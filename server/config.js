@@ -13,5 +13,6 @@ module.exports = {
   POINTS_PER_CORRECT: Number(process.env.POINTS_PER_CORRECT) || 10,
   MIN_MATCHES_PER_KEYWORD: Number(process.env.MIN_MATCHES_PER_KEYWORD) || 3,
   MAX_MATCHES_PER_KEYWORD: Number(process.env.MAX_MATCHES_PER_KEYWORD) || 8,
+  SPAWN_SAFE_RADIUS: Number(process.env.SPAWN_SAFE_RADIUS) || 2,
   ROOM_CODE_LENGTH: Number(process.env.ROOM_CODE_LENGTH) || 4,
 };
