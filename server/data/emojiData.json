@@ -1,0 +1,25 @@
+{
+  "_comment": "Generated from 'QMoji 2.0 Gameplay Prototyping Project' CSV. Each entry is one playable emoji and the keywords a player-given prompt may ask for. Keywords are lowercase for case-insensitive matching.",
+  "emoji": [
+    { "symbol": "🤣", "keywords": ["crying", "face", "floor", "funny", "haha", "happy", "hehe", "hilarious", "joy", "laugh", "lmao", "lol", "rofl", "roflmao", "rolling", "tear"] },
+    { "symbol": "😘", "keywords": ["adorbs", "bae", "blowing", "face", "flirt", "heart", "ily", "kiss", "love", "lover", "miss", "muah", "romantic", "smooch", "xoxo", "you"] },
+    { "symbol": "👏", "keywords": ["applause", "approval", "awesome", "clap", "congrats", "congratulations", "excited", "good", "great", "hand", "homie", "job", "nice", "prayed", "well", "yay"] },
+    { "symbol": "😳", "keywords": ["amazed", "awkward", "crazy", "dazed", "dead", "disbelief", "embarrassed", "face", "flushed", "geez", "heat", "hot", "impressed", "jeez", "what", "wow"] },
+    { "symbol": "😎", "keywords": ["awesome", "beach", "bright", "bro", "chilling", "cool", "face", "rad", "relaxed", "shades", "slay", "smile", "style", "sunglasses", "swag", "win"] },
+    { "symbol": "👌", "keywords": ["awesome", "bet", "dope", "fleek", "fosho", "got", "gotcha", "hand", "legit", "ok", "okay", "pinch", "rad", "sure", "sweet", "three"] },
+    { "symbol": "💪", "keywords": ["arm", "beast", "bench", "biceps", "bodybuilder", "bro", "curls", "flex", "gains", "gym", "jacked", "muscle", "press", "ripped", "strong", "weightlift"] },
+    { "symbol": "😏", "keywords": ["boss", "dapper", "face", "flirt", "homie", "kidding", "leer", "shade", "slick", "sly", "smirk", "smug", "snicker", "suave", "suspicious", "swag"] },
+    { "symbol": "💯", "keywords": ["100", "a+", "agree", "clearly", "definitely", "faithful", "fleek", "full", "hundred", "keep", "perfect", "point", "score", "true", "truth", "yup"] },
+    { "symbol": "😜", "keywords": ["crazy", "epic", "eye", "face", "funny", "joke", "loopy", "nutty", "party", "stuck-out", "tongue", "wacky", "weirdo", "wink", "winking", "yolo"] },
+    { "symbol": "😐", "keywords": ["awkward", "blank", "deadpan", "expressionless", "face", "fine", "jealous", "meh", "neutral", "oh", "shade", "straight", "unamused", "unhappy", "unimpressed", "whatever"] },
+    { "symbol": "😇", "keywords": ["angel", "angelic", "angels", "blessed", "face", "fairy", "fairytale", "fantasy", "halo", "happy", "innocent", "peaceful", "smile", "smiling", "spirit", "tale"] },
+    { "symbol": "💰", "keywords": ["bag", "bank", "bet", "billion", "cash", "cost", "dollar", "gold", "million", "money", "moneybag", "paid", "paying", "pot", "rich", "win"] },
+    { "symbol": "😑", "keywords": ["awkward", "dead", "expressionless", "face", "fine", "inexpressive", "jealous", "meh", "not", "oh", "omg", "straight", "uh", "unhappy", "unimpressed", "whatever"] },
+    { "symbol": "💩", "keywords": ["bs", "comic", "doo", "dung", "face", "fml", "monster", "pile", "poo", "poop", "smelly", "smh", "stink", "stinks", "stinky", "turd"] },
+    { "symbol": "👋", "keywords": ["bye", "cya", "g2g", "greetings", "gtg", "hand", "hello", "hey", "hi", "later", "outtie", "ttfn", "ttyl", "wave", "yo", "you"] },
+    { "symbol": "🌈", "keywords": ["gay", "genderqueer", "glbt", "glbtq", "lesbian", "lgbt", "lgbtq", "lgbtqia", "nature", "pride", "queer", "rain", "rainbow", "trans", "transgender", "weather"] },
+    { "symbol": "👊", "keywords": ["absolutely", "agree", "boom", "bro", "bruh", "bump", "clenched", "correct", "fist", "hand", "knuckle", "oncoming", "pound", "punch", "rock", "ttyl"] },
+    { "symbol": "🥹", "keywords": ["admiration", "aww", "back", "cry", "embarrassed", "face", "feelings", "grateful", "gratitude", "holding", "joy", "please", "proud", "resist", "sad", "tears"] },
+    { "symbol": "😙", "keywords": ["143", "closed", "date", "dating", "eye", "eyes", "face", "flirt", "ily", "kiss", "kisses", "kissing", "love", "night", "smile", "smiling"] }
+  ]
+}

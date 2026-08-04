@@ -1,0 +1,9 @@
+{
+ "name": "ScoreText",
+ "plugin-id": "Text",
+ "sid": 200000000870645,
+ "isGlobal": false,
+ "instanceVariables": [],
+ "behaviorTypes": [],
+ "effectTypes": []
+}

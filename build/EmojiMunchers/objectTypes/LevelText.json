@@ -1,0 +1,9 @@
+{
+ "name": "LevelText",
+ "plugin-id": "Text",
+ "sid": 200000001049750,
+ "isGlobal": false,
+ "instanceVariables": [],
+ "behaviorTypes": [],
+ "effectTypes": []
+}

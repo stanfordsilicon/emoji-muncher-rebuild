@@ -1,0 +1,9 @@
+{
+ "name": "RestartLabel",
+ "plugin-id": "Text",
+ "sid": 200000001178163,
+ "isGlobal": false,
+ "instanceVariables": [],
+ "behaviorTypes": [],
+ "effectTypes": []
+}

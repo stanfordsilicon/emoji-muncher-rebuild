@@ -1,0 +1,9 @@
+{
+ "name": "LivesText",
+ "plugin-id": "Text",
+ "sid": 200000000956826,
+ "isGlobal": false,
+ "instanceVariables": [],
+ "behaviorTypes": [],
+ "effectTypes": []
+}

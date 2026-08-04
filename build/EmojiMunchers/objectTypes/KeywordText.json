@@ -1,0 +1,9 @@
+{
+ "name": "KeywordText",
+ "plugin-id": "Text",
+ "sid": 200000000775795,
+ "isGlobal": false,
+ "instanceVariables": [],
+ "behaviorTypes": [],
+ "effectTypes": []
+}

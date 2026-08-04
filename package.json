@@ -1,0 +1,14 @@
+{
+  "name": "emoji-munchers",
+  "version": "1.0.0",
+  "description": "Multiplayer emoji-keyword munching game.",
+  "main": "server/server.js",
+  "scripts": {
+    "start": "node server/server.js",
+    "dev": "node --watch server/server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "socket.io": "^4.7.5"
+  }
+}

@@ -1,0 +1,1187 @@
+{
+ "name": "Game",
+ "events": [
+  {
+   "eventType": "comment",
+   "text": "=== Backend database: category names + their matching emoji pools ==="
+  },
+  {
+   "eventType": "variable",
+   "name": "CategoryNames",
+   "type": "string",
+   "initialValue": "\"Animals,Fruits,Vehicles,Sports,Weather,Faces,Instruments\"",
+   "comment": "Comma-separated list of the 7 playable keyword categories.",
+   "isStatic": false,
+   "isConstant": false,
+   "sid": 200000001385484
+  },
+  {
+   "eventType": "variable",
+   "name": "PoolsAll",
+   "type": "string",
+   "initialValue": "\"\ud83d\udc36,\ud83d\udc31,\ud83e\udd81,\ud83d\udc18,\ud83d\udc27,\ud83d\udc22,\ud83e\udd8a,\ud83d\udc34;\ud83c\udf4e,\ud83c\udf4c,\ud83c\udf47,\ud83c\udf53,\ud83c\udf4d,\ud83c\udf51,\ud83c\udf49,\ud83e\udd5d;\ud83d\ude97,\ud83d\ude95,\ud83d\ude8c,\ud83d\ude93,\ud83d\ude91,\ud83d\ude92,\ud83d\ude80,\ud83d\ude81;\u26bd,\ud83c\udfc0,\ud83c\udfc8,\u26be,\ud83c\udfbe,\ud83c\udfd0,\ud83c\udfd3,\ud83e\udd4a;\ud83c\udf1e,\ud83c\udf27,\u26c4,\ud83c\udf08,\u26c8,\u2744,\ud83c\udf2a,\ud83c\udf0a;\ud83d\ude00,\ud83d\ude22,\ud83d\ude21,\ud83d\ude31,\ud83d\ude34,\ud83e\udd73,\ud83d\ude0e,\ud83e\udd14;\ud83c\udfb8,\ud83c\udfb9,\ud83e\udd41,\ud83c\udfba,\ud83c\udfbb,\ud83c\udfb7,\ud83d\udcef,\ud83e\ude97\"",
+   "comment": "Semicolon-separated groups (aligned by index with CategoryNames); each group is a comma-separated list of the emoji that belong to that category. This is the 'backend database' the game checks munches against.",
+   "isStatic": false,
+   "isConstant": false,
+   "sid": 200000001407410
+  },
+  {
+   "eventType": "variable",
+   "name": "KeywordIndex",
+   "type": "number",
+   "initialValue": "0",
+   "comment": "",
+   "isStatic": false,
+   "isConstant": false,
+   "sid": 200000001499916
+  },
+  {
+   "eventType": "variable",
+   "name": "CurrentKeyword",
+   "type": "string",
+   "initialValue": "\"\"",
+   "comment": "",
+   "isStatic": false,
+   "isConstant": false,
+   "sid": 200000001556308
+  },
+  {
+   "eventType": "variable",
+   "name": "CurrentPool",
+   "type": "string",
+   "initialValue": "\"\"",
+   "comment": "",
+   "isStatic": false,
+   "isConstant": false,
+   "sid": 200000001601905
+  },
+  {
+   "eventType": "variable",
+   "name": "TempEmoji",
+   "type": "string",
+   "initialValue": "\"\"",
+   "comment": "",
+   "isStatic": false,
+   "isConstant": false,
+   "sid": 200000001639326
+  },
+  {
+   "eventType": "variable",
+   "name": "Score",
+   "type": "number",
+   "initialValue": "0",
+   "comment": "",
+   "isStatic": false,
+   "isConstant": false,
+   "sid": 200000001660705
+  },
+  {
+   "eventType": "variable",
+   "name": "Lives",
+   "type": "number",
+   "initialValue": "3",
+   "comment": "",
+   "isStatic": false,
+   "isConstant": false,
+   "sid": 200000001689926
+  },
+  {
+   "eventType": "variable",
+   "name": "Level",
+   "type": "number",
+   "initialValue": "0",
+   "comment": "",
+   "isStatic": false,
+   "isConstant": false,
+   "sid": 200000001735044
+  },
+  {
+   "eventType": "variable",
+   "name": "RemainingCorrect",
+   "type": "number",
+   "initialValue": "0",
+   "comment": "",
+   "isStatic": false,
+   "isConstant": false,
+   "sid": 200000001749440
+  },
+  {
+   "eventType": "variable",
+   "name": "IsGameOver",
+   "type": "boolean",
+   "initialValue": "false",
+   "comment": "",
+   "isStatic": false,
+   "isConstant": false,
+   "sid": 200000001762596
+  },
+  {
+   "eventType": "variable",
+   "name": "TriggerNewBoard",
+   "type": "boolean",
+   "initialValue": "true",
+   "comment": "",
+   "isStatic": false,
+   "isConstant": false,
+   "sid": 200000001813393
+  },
+  {
+   "eventType": "variable",
+   "name": "DirRoll",
+   "type": "number",
+   "initialValue": "0",
+   "comment": "",
+   "isStatic": false,
+   "isConstant": false,
+   "sid": 200000001827069
+  },
+  {
+   "eventType": "group",
+   "disabled": false,
+   "title": "Setup",
+   "description": "",
+   "isActiveOnStart": true,
+   "children": [
+    {
+     "eventType": "comment",
+     "text": "Runs once: build the invisible border walls that keep the muncher and troggles on the grid."
+    },
+    {
+     "eventType": "block",
+     "conditions": [
+      {
+       "id": "on-start-of-layout",
+       "objectClass": "System",
+       "sid": 200000002290209
+      }
+     ],
+     "actions": [
+      {
+       "id": "set-boolean-eventvar",
+       "objectClass": "System",
+       "sid": 200000002340824,
+       "parameters": {
+        "variable": "TriggerNewBoard",
+        "value": "true"
+       }
+      }
+     ],
+     "sid": 200000002352152,
+     "children": [
+      {
+       "eventType": "block",
+       "conditions": [
+        {
+         "id": "for",
+         "objectClass": "System",
+         "sid": 200000001875121,
+         "parameters": {
+          "name": "\"WallCol\"",
+          "start-index": "-1",
+          "end-index": "7"
+         }
+        }
+       ],
+       "actions": [
+        {
+         "id": "create-object",
+         "objectClass": "System",
+         "sid": 200000001921203,
+         "parameters": {
+          "object-to-create": "Wall",
+          "layer": "1",
+          "x": "10 + loopindex(\"WallCol\") * 60",
+          "y": "30",
+          "create-hierarchy": false,
+          "template-name": "\"\""
+         }
+        },
+        {
+         "id": "create-object",
+         "objectClass": "System",
+         "sid": 200000002001334,
+         "parameters": {
+          "object-to-create": "Wall",
+          "layer": "1",
+          "x": "10 + loopindex(\"WallCol\") * 60",
+          "y": "450",
+          "create-hierarchy": false,
+          "template-name": "\"\""
+         }
+        }
+       ],
+       "sid": 200000002037005
+      },
+      {
+       "eventType": "block",
+       "conditions": [
+        {
+         "id": "for",
+         "objectClass": "System",
+         "sid": 200000002043700,
+         "parameters": {
+          "name": "\"WallRow\"",
+          "start-index": "0",
+          "end-index": "5"
+         }
+        }
+       ],
+       "actions": [
+        {
+         "id": "create-object",
+         "objectClass": "System",
+         "sid": 200000002140347,
+         "parameters": {
+          "object-to-create": "Wall",
+          "layer": "1",
+          "x": "-50",
+          "y": "90 + loopindex(\"WallRow\") * 60",
+          "create-hierarchy": false,
+          "template-name": "\"\""
+         }
+        },
+        {
+         "id": "create-object",
+         "objectClass": "System",
+         "sid": 200000002201564,
+         "parameters": {
+          "object-to-create": "Wall",
+          "layer": "1",
+          "x": "430",
+          "y": "90 + loopindex(\"WallRow\") * 60",
+          "create-hierarchy": false,
+          "template-name": "\"\""
+         }
+        }
+       ],
+       "sid": 200000002272848
+      }
+     ]
+    }
+   ],
+   "sid": 200000002425509
+  },
+  {
+   "eventType": "group",
+   "disabled": false,
+   "title": "Board generation",
+   "description": "",
+   "isActiveOnStart": true,
+   "children": [
+    {
+     "eventType": "block",
+     "conditions": [
+      {
+       "id": "compare-boolean-eventvar",
+       "objectClass": "System",
+       "sid": 200000003930877,
+       "parameters": {
+        "variable": "TriggerNewBoard"
+       }
+      },
+      {
+       "id": "trigger-once-while-true",
+       "objectClass": "System",
+       "sid": 200000003941235
+      }
+     ],
+     "actions": [],
+     "sid": 200000004022075,
+     "children": [
+      {
+       "eventType": "comment",
+       "text": "Clear any cells left from the previous round."
+      },
+      {
+       "eventType": "block",
+       "conditions": [
+        {
+         "id": "for-each",
+         "objectClass": "System",
+         "sid": 200000003195090,
+         "parameters": {
+          "object": "Cell"
+         }
+        }
+       ],
+       "actions": [
+        {
+         "id": "destroy",
+         "objectClass": "Cell",
+         "sid": 200000003255519
+        }
+       ],
+       "sid": 200000003339839
+      },
+      {
+       "eventType": "comment",
+       "text": "Pick a new random keyword and its matching emoji pool from the backend database."
+      },
+      {
+       "eventType": "block",
+       "conditions": [],
+       "actions": [
+        {
+         "id": "set-eventvar-value",
+         "objectClass": "System",
+         "sid": 200000003388658,
+         "parameters": {
+          "variable": "TriggerNewBoard",
+          "value": "false"
+         }
+        },
+        {
+         "id": "add-to-eventvar",
+         "objectClass": "System",
+         "sid": 200000003410977,
+         "parameters": {
+          "variable": "Level",
+          "value": "1"
+         }
+        },
+        {
+         "id": "set-eventvar-value",
+         "objectClass": "System",
+         "sid": 200000003460497,
+         "parameters": {
+          "variable": "KeywordIndex",
+          "value": "int(random(tokencount(CategoryNames, \",\")))"
+         }
+        },
+        {
+         "id": "set-eventvar-value",
+         "objectClass": "System",
+         "sid": 200000003508063,
+         "parameters": {
+          "variable": "CurrentKeyword",
+          "value": "tokenat(CategoryNames, KeywordIndex, \",\")"
+         }
+        },
+        {
+         "id": "set-eventvar-value",
+         "objectClass": "System",
+         "sid": 200000003536523,
+         "parameters": {
+          "variable": "CurrentPool",
+          "value": "tokenat(PoolsAll, KeywordIndex, \";\")"
+         }
+        },
+        {
+         "id": "set-eventvar-value",
+         "objectClass": "System",
+         "sid": 200000003625364,
+         "parameters": {
+          "variable": "RemainingCorrect",
+          "value": "0"
+         }
+        },
+        {
+         "id": "set-text",
+         "objectClass": "KeywordText",
+         "sid": 200000003661357,
+         "parameters": {
+          "text": "\"Find: \" & CurrentKeyword"
+         }
+        },
+        {
+         "id": "set-text",
+         "objectClass": "LevelText",
+         "sid": 200000003754345,
+         "parameters": {
+          "text": "\"Level: \" & Level"
+         }
+        }
+       ],
+       "sid": 200000003844938
+      },
+      {
+       "eventType": "block",
+       "conditions": [
+        {
+         "id": "for",
+         "objectClass": "System",
+         "sid": 200000002885145,
+         "parameters": {
+          "name": "\"Grid Row\"",
+          "start-index": "0",
+          "end-index": "5"
+         }
+        }
+       ],
+       "actions": [],
+       "sid": 200000003157656,
+       "children": [
+        {
+         "eventType": "block",
+         "conditions": [
+          {
+           "id": "for",
+           "objectClass": "System",
+           "sid": 200000002892151,
+           "parameters": {
+            "name": "\"Grid Col\"",
+            "start-index": "0",
+            "end-index": "6"
+           }
+          }
+         ],
+         "actions": [
+          {
+           "id": "create-object",
+           "objectClass": "System",
+           "sid": 200000002979824,
+           "parameters": {
+            "object-to-create": "Cell",
+            "layer": "0",
+            "x": "10 + loopindex(\"Grid Col\") * 60 + 30",
+            "y": "90 + loopindex(\"Grid Row\") * 60 + 30",
+            "create-hierarchy": false,
+            "template-name": "\"\""
+           }
+          },
+          {
+           "id": "set-eventvar-value",
+           "objectClass": "System",
+           "sid": 200000003010695,
+           "parameters": {
+            "variable": "TempEmoji",
+            "value": "tokenat(replace(PoolsAll, \";\", \",\"), int(random(tokencount(replace(PoolsAll, \";\", \",\"), \",\"))), \",\")"
+           }
+          }
+         ],
+         "sid": 200000003106833,
+         "children": [
+          {
+           "eventType": "comment",
+           "text": "Find the pre-placed emoji label at this same grid position and write the freshly-picked emoji into it."
+          },
+          {
+           "eventType": "block",
+           "conditions": [
+            {
+             "id": "pick-overlapping-point",
+             "objectClass": "System",
+             "sid": 200000003049625,
+             "parameters": {
+              "object": "EmojiText",
+              "x": "Cell.X",
+              "y": "Cell.Y"
+             }
+            }
+           ],
+           "actions": [
+            {
+             "id": "set-text",
+             "objectClass": "EmojiText",
+             "sid": 200000003061083,
+             "parameters": {
+              "text": "TempEmoji"
+             }
+            }
+           ],
+           "sid": 200000003092595
+          },
+          {
+           "eventType": "comment",
+           "text": "Compare against the backend database (PoolsAll) to decide if this emoji matches the current keyword."
+          },
+          {
+           "eventType": "block",
+           "conditions": [
+            {
+             "id": "compare-two-values",
+             "objectClass": "System",
+             "sid": 200000002464936,
+             "parameters": {
+              "first-value": "find(CurrentPool, TempEmoji)",
+              "comparison": 5,
+              "second-value": "0"
+             }
+            }
+           ],
+           "actions": [
+            {
+             "id": "set-animation-frame",
+             "objectClass": "Cell",
+             "sid": 200000002548333,
+             "parameters": {
+              "frame-number": "1"
+             }
+            },
+            {
+             "id": "add-to-eventvar",
+             "objectClass": "System",
+             "sid": 200000002630403,
+             "parameters": {
+              "variable": "RemainingCorrect",
+              "value": "1"
+             }
+            }
+           ],
+           "sid": 200000002678803
+          },
+          {
+           "eventType": "block",
+           "conditions": [
+            {
+             "id": "else",
+             "objectClass": "System",
+             "sid": 200000002755477
+            }
+           ],
+           "actions": [
+            {
+             "id": "set-animation-frame",
+             "objectClass": "Cell",
+             "sid": 200000002781680,
+             "parameters": {
+              "frame-number": "0"
+             }
+            }
+           ],
+           "sid": 200000002875029
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    }
+   ],
+   "sid": 200000004106302
+  },
+  {
+   "eventType": "group",
+   "disabled": false,
+   "title": "Munching",
+   "description": "",
+   "isActiveOnStart": true,
+   "children": [
+    {
+     "eventType": "block",
+     "conditions": [
+      {
+       "id": "compare-boolean-eventvar",
+       "objectClass": "System",
+       "sid": 200000005101882,
+       "parameters": {
+        "variable": "IsGameOver"
+       },
+       "isInverted": true
+      }
+     ],
+     "actions": [],
+     "sid": 200000005130535,
+     "children": [
+      {
+       "eventType": "block",
+       "conditions": [
+        {
+         "id": "is-overlapping-another-object",
+         "objectClass": "Player",
+         "sid": 200000005002533,
+         "parameters": {
+          "object": "Cell"
+         }
+        },
+        {
+         "id": "trigger-once-while-true",
+         "objectClass": "System",
+         "sid": 200000005056114
+        }
+       ],
+       "actions": [],
+       "sid": 200000005092207,
+       "children": [
+        {
+         "eventType": "block",
+         "conditions": [
+          {
+           "id": "compare-animation-frame",
+           "objectClass": "Cell",
+           "sid": 200000004129733,
+           "parameters": {
+            "comparison": 0,
+            "number": "1"
+           }
+          }
+         ],
+         "actions": [
+          {
+           "id": "add-to-eventvar",
+           "objectClass": "System",
+           "sid": 200000004200743,
+           "parameters": {
+            "variable": "Score",
+            "value": "10"
+           }
+          },
+          {
+           "id": "subtract-from-eventvar",
+           "objectClass": "System",
+           "sid": 200000004297311,
+           "parameters": {
+            "variable": "RemainingCorrect",
+            "value": "1"
+           }
+          },
+          {
+           "id": "set-text",
+           "objectClass": "ScoreText",
+           "sid": 200000004330398,
+           "parameters": {
+            "text": "\"Score: \" & Score"
+           }
+          },
+          {
+           "id": "destroy",
+           "objectClass": "Cell",
+           "sid": 200000004352815
+          }
+         ],
+         "sid": 200000004586407,
+         "children": [
+          {
+           "eventType": "block",
+           "conditions": [
+            {
+             "id": "pick-overlapping-point",
+             "objectClass": "System",
+             "sid": 200000004414404,
+             "parameters": {
+              "object": "EmojiText",
+              "x": "Cell.X",
+              "y": "Cell.Y"
+             }
+            }
+           ],
+           "actions": [
+            {
+             "id": "set-text",
+             "objectClass": "EmojiText",
+             "sid": 200000004465139,
+             "parameters": {
+              "text": "\"\""
+             }
+            }
+           ],
+           "sid": 200000004501521
+          }
+         ]
+        },
+        {
+         "eventType": "block",
+         "conditions": [
+          {
+           "id": "else",
+           "objectClass": "System",
+           "sid": 200000004677605
+          }
+         ],
+         "actions": [
+          {
+           "id": "subtract-from-eventvar",
+           "objectClass": "System",
+           "sid": 200000004751605,
+           "parameters": {
+            "variable": "Lives",
+            "value": "1"
+           }
+          },
+          {
+           "id": "set-text",
+           "objectClass": "LivesText",
+           "sid": 200000004781390,
+           "parameters": {
+            "text": "\"Lives: \" & Lives"
+           }
+          },
+          {
+           "id": "destroy",
+           "objectClass": "Cell",
+           "sid": 200000004872123
+          }
+         ],
+         "sid": 200000004960186,
+         "children": [
+          {
+           "eventType": "block",
+           "conditions": [
+            {
+             "id": "pick-overlapping-point",
+             "objectClass": "System",
+             "sid": 200000004915627,
+             "parameters": {
+              "object": "EmojiText",
+              "x": "Cell.X",
+              "y": "Cell.Y"
+             }
+            }
+           ],
+           "actions": [
+            {
+             "id": "set-text",
+             "objectClass": "EmojiText",
+             "sid": 200000004923958,
+             "parameters": {
+              "text": "\"\""
+             }
+            }
+           ],
+           "sid": 200000004954979
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    }
+   ],
+   "sid": 200000005205876
+  },
+  {
+   "eventType": "group",
+   "disabled": false,
+   "title": "Round complete",
+   "description": "",
+   "isActiveOnStart": true,
+   "children": [
+    {
+     "eventType": "block",
+     "conditions": [
+      {
+       "id": "compare-eventvar",
+       "objectClass": "System",
+       "sid": 200000005300974,
+       "parameters": {
+        "variable": "RemainingCorrect",
+        "comparison": 3,
+        "value": "0"
+       }
+      },
+      {
+       "id": "compare-boolean-eventvar",
+       "objectClass": "System",
+       "sid": 200000005343219,
+       "parameters": {
+        "variable": "IsGameOver"
+       },
+       "isInverted": true
+      },
+      {
+       "id": "trigger-once-while-true",
+       "objectClass": "System",
+       "sid": 200000005372088
+      }
+     ],
+     "actions": [
+      {
+       "id": "set-boolean-eventvar",
+       "objectClass": "System",
+       "sid": 200000005458997,
+       "parameters": {
+        "variable": "TriggerNewBoard",
+        "value": "true"
+       }
+      }
+     ],
+     "sid": 200000005525432
+    }
+   ],
+   "sid": 200000005578288
+  },
+  {
+   "eventType": "group",
+   "disabled": false,
+   "title": "Troggle wandering",
+   "description": "",
+   "isActiveOnStart": true,
+   "children": [
+    {
+     "eventType": "block",
+     "conditions": [
+      {
+       "id": "compare-boolean-eventvar",
+       "objectClass": "System",
+       "sid": 200000006555783,
+       "parameters": {
+        "variable": "IsGameOver"
+       },
+       "isInverted": true
+      }
+     ],
+     "actions": [],
+     "sid": 200000006574914,
+     "children": [
+      {
+       "eventType": "block",
+       "conditions": [
+        {
+         "id": "for-each",
+         "objectClass": "System",
+         "sid": 200000006346756,
+         "parameters": {
+          "object": "Troggle"
+         }
+        },
+        {
+         "id": "every-x-seconds",
+         "objectClass": "System",
+         "sid": 200000006424240,
+         "parameters": {
+          "interval-seconds": "1.2"
+         }
+        }
+       ],
+       "actions": [
+        {
+         "id": "set-eventvar-value",
+         "objectClass": "System",
+         "sid": 200000006477590,
+         "parameters": {
+          "variable": "DirRoll",
+          "value": "int(random(4))"
+         }
+        }
+       ],
+       "sid": 200000006526037,
+       "children": [
+        {
+         "eventType": "block",
+         "conditions": [
+          {
+           "id": "compare-eventvar",
+           "objectClass": "System",
+           "sid": 200000005663547,
+           "parameters": {
+            "variable": "DirRoll",
+            "comparison": 0,
+            "value": "0"
+           }
+          }
+         ],
+         "actions": [
+          {
+           "id": "simulate-control",
+           "objectClass": "Troggle",
+           "sid": 200000005724689,
+           "parameters": {
+            "control": "left"
+           },
+           "behaviorType": "TileMovement"
+          }
+         ],
+         "sid": 200000005744415
+        },
+        {
+         "eventType": "block",
+         "conditions": [
+          {
+           "id": "compare-eventvar",
+           "objectClass": "System",
+           "sid": 200000005780133,
+           "parameters": {
+            "variable": "DirRoll",
+            "comparison": 0,
+            "value": "1"
+           }
+          }
+         ],
+         "actions": [
+          {
+           "id": "simulate-control",
+           "objectClass": "Troggle",
+           "sid": 200000005799434,
+           "parameters": {
+            "control": "right"
+           },
+           "behaviorType": "TileMovement"
+          }
+         ],
+         "sid": 200000005832759
+        },
+        {
+         "eventType": "block",
+         "conditions": [
+          {
+           "id": "compare-eventvar",
+           "objectClass": "System",
+           "sid": 200000005931406,
+           "parameters": {
+            "variable": "DirRoll",
+            "comparison": 0,
+            "value": "2"
+           }
+          }
+         ],
+         "actions": [
+          {
+           "id": "simulate-control",
+           "objectClass": "Troggle",
+           "sid": 200000006005985,
+           "parameters": {
+            "control": "up"
+           },
+           "behaviorType": "TileMovement"
+          }
+         ],
+         "sid": 200000006077629
+        },
+        {
+         "eventType": "block",
+         "conditions": [
+          {
+           "id": "compare-eventvar",
+           "objectClass": "System",
+           "sid": 200000006113067,
+           "parameters": {
+            "variable": "DirRoll",
+            "comparison": 0,
+            "value": "3"
+           }
+          }
+         ],
+         "actions": [
+          {
+           "id": "simulate-control",
+           "objectClass": "Troggle",
+           "sid": 200000006211979,
+           "parameters": {
+            "control": "down"
+           },
+           "behaviorType": "TileMovement"
+          }
+         ],
+         "sid": 200000006289601
+        }
+       ]
+      }
+     ]
+    }
+   ],
+   "sid": 200000006642698
+  },
+  {
+   "eventType": "group",
+   "disabled": false,
+   "title": "Troggle collision",
+   "description": "",
+   "isActiveOnStart": true,
+   "children": [
+    {
+     "eventType": "block",
+     "conditions": [
+      {
+       "id": "compare-boolean-eventvar",
+       "objectClass": "System",
+       "sid": 200000006870087,
+       "parameters": {
+        "variable": "IsGameOver"
+       },
+       "isInverted": true
+      }
+     ],
+     "actions": [],
+     "sid": 200000006960279,
+     "children": [
+      {
+       "eventType": "block",
+       "conditions": [
+        {
+         "id": "is-overlapping-another-object",
+         "objectClass": "Player",
+         "sid": 200000006708384,
+         "parameters": {
+          "object": "Troggle"
+         }
+        },
+        {
+         "id": "trigger-once-while-true",
+         "objectClass": "System",
+         "sid": 200000006721299
+        }
+       ],
+       "actions": [
+        {
+         "id": "subtract-from-eventvar",
+         "objectClass": "System",
+         "sid": 200000006728474,
+         "parameters": {
+          "variable": "Lives",
+          "value": "1"
+         }
+        },
+        {
+         "id": "set-text",
+         "objectClass": "LivesText",
+         "sid": 200000006743845,
+         "parameters": {
+          "text": "\"Lives: \" & Lives"
+         }
+        },
+        {
+         "id": "set-grid-position",
+         "objectClass": "Player",
+         "sid": 200000006764878,
+         "parameters": {
+          "x": "40",
+          "y": "420",
+          "instant": "instant"
+         },
+         "behaviorType": "TileMovement"
+        }
+       ],
+       "sid": 200000006848118
+      }
+     ]
+    }
+   ],
+   "sid": 200000007016612
+  },
+  {
+   "eventType": "group",
+   "disabled": false,
+   "title": "Game over",
+   "description": "",
+   "isActiveOnStart": true,
+   "children": [
+    {
+     "eventType": "block",
+     "conditions": [
+      {
+       "id": "compare-eventvar",
+       "objectClass": "System",
+       "sid": 200000007095784,
+       "parameters": {
+        "variable": "Lives",
+        "comparison": 3,
+        "value": "0"
+       }
+      },
+      {
+       "id": "compare-boolean-eventvar",
+       "objectClass": "System",
+       "sid": 200000007105110,
+       "parameters": {
+        "variable": "IsGameOver"
+       },
+       "isInverted": true
+      },
+      {
+       "id": "trigger-once-while-true",
+       "objectClass": "System",
+       "sid": 200000007156542
+      }
+     ],
+     "actions": [
+      {
+       "id": "set-boolean-eventvar",
+       "objectClass": "System",
+       "sid": 200000007207561,
+       "parameters": {
+        "variable": "IsGameOver",
+        "value": "true"
+       }
+      },
+      {
+       "id": "set-enabled",
+       "objectClass": "Player",
+       "sid": 200000007286665,
+       "parameters": {
+        "state": "disabled"
+       },
+       "behaviorType": "TileMovement"
+      },
+      {
+       "id": "set-visible",
+       "objectClass": "GameOverText",
+       "sid": 200000007349013,
+       "parameters": {
+        "visibility": "visible"
+       }
+      },
+      {
+       "id": "set-visible",
+       "objectClass": "RestartBtn",
+       "sid": 200000007419365,
+       "parameters": {
+        "visibility": "visible"
+       }
+      },
+      {
+       "id": "set-visible",
+       "objectClass": "RestartLabel",
+       "sid": 200000007453318,
+       "parameters": {
+        "visibility": "visible"
+       }
+      }
+     ],
+     "sid": 200000007714966,
+     "children": [
+      {
+       "eventType": "block",
+       "conditions": [
+        {
+         "id": "for-each",
+         "objectClass": "System",
+         "sid": 200000007526830,
+         "parameters": {
+          "object": "Troggle"
+         }
+        }
+       ],
+       "actions": [
+        {
+         "id": "set-enabled",
+         "objectClass": "Troggle",
+         "sid": 200000007529334,
+         "parameters": {
+          "state": "disabled"
+         },
+         "behaviorType": "TileMovement"
+        }
+       ],
+       "sid": 200000007619500
+      }
+     ]
+    }
+   ],
+   "sid": 200000007730980
+  },
+  {
+   "eventType": "group",
+   "disabled": false,
+   "title": "Restart",
+   "description": "",
+   "isActiveOnStart": true,
+   "children": [
+    {
+     "eventType": "block",
+     "conditions": [
+      {
+       "id": "on-object-clicked",
+       "objectClass": "Mouse",
+       "sid": 200000007821333,
+       "parameters": {
+        "mouse-button": "left",
+        "click-type": "clicked",
+        "object-clicked": "RestartBtn"
+       }
+      }
+     ],
+     "actions": [
+      {
+       "id": "restart-layout",
+       "objectClass": "System",
+       "sid": 200000007892714
+      }
+     ],
+     "sid": 200000007992133
+    }
+   ],
+   "sid": 200000008028106
+  }
+ ],
+ "sid": 200000008113118
+}

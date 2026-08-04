@@ -1,0 +1,60 @@
+{
+ "name": "Player",
+ "plugin-id": "Sprite",
+ "sid": 200000000363094,
+ "isGlobal": false,
+ "instanceVariables": [],
+ "behaviorTypes": [
+  {
+   "behaviorId": "TileMovement",
+   "name": "TileMovement",
+   "sid": 200000000175318
+  },
+  {
+   "behaviorId": "bound",
+   "name": "BoundToLayout",
+   "sid": 200000000265014
+  }
+ ],
+ "effectTypes": [],
+ "animations": {
+  "items": [
+   {
+    "frames": [
+     {
+      "width": 52,
+      "height": 52,
+      "originX": 0.5,
+      "originY": 0.5,
+      "originalSource": "",
+      "exportFormat": "lossless",
+      "exportQuality": 0.8,
+      "imageSpriteId": 2441057,
+      "collisionPoly": {
+       "points": [
+        0,
+        0,
+        1,
+        0,
+        1,
+        1,
+        0,
+        1
+       ]
+      },
+      "useCollisionPoly": true,
+      "duration": 1
+     }
+    ],
+    "sid": 200000000160884,
+    "name": "default",
+    "isLooping": false,
+    "isPingPong": false,
+    "repeatCount": 1,
+    "repeatTo": 0,
+    "speed": 0
+   }
+  ],
+  "subfolders": []
+ }
+}

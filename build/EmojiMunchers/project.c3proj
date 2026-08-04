@@ -1,0 +1,180 @@
+{
+ "projectFormatVersion": 1,
+ "savedWithRelease": 49500,
+ "name": "Emoji Munchers",
+ "runtime": "c3",
+ "useWorker": "auto",
+ "bundleAddons": false,
+ "usedAddons": [
+  {
+   "type": "plugin",
+   "id": "Sprite",
+   "name": "Sprite",
+   "author": "Scirra",
+   "bundled": false
+  },
+  {
+   "type": "plugin",
+   "id": "Text",
+   "name": "Text",
+   "author": "Scirra",
+   "bundled": false
+  },
+  {
+   "type": "plugin",
+   "id": "Mouse",
+   "name": "Mouse",
+   "author": "Scirra",
+   "bundled": false
+  },
+  {
+   "type": "behavior",
+   "id": "TileMovement",
+   "name": "Tile movement",
+   "author": "Scirra",
+   "bundled": false
+  },
+  {
+   "type": "behavior",
+   "id": "bound",
+   "name": "Bound to layout",
+   "author": "Scirra",
+   "bundled": false
+  },
+  {
+   "type": "behavior",
+   "id": "solid",
+   "name": "Solid",
+   "author": "Scirra",
+   "bundled": false
+  }
+ ],
+ "uniqueId": "emojimunchers1",
+ "objectTypes": {
+  "items": [
+   "Cell",
+   "Player",
+   "Troggle",
+   "Wall",
+   "RestartBtn",
+   "EmojiText",
+   "KeywordText",
+   "ScoreText",
+   "LivesText",
+   "LevelText",
+   "GameOverText",
+   "RestartLabel",
+   "Mouse"
+  ],
+  "subfolders": []
+ },
+ "autosaveData": null,
+ "containers": [],
+ "families": {
+  "items": [],
+  "subfolders": []
+ },
+ "layouts": {
+  "items": [
+   "Game"
+  ],
+  "subfolders": []
+ },
+ "eventSheets": {
+  "items": [
+   "Game"
+  ],
+  "subfolders": []
+ },
+ "rootFileFolders": {
+  "script": {
+   "items": [],
+   "subfolders": []
+  },
+  "sound": {
+   "items": [],
+   "subfolders": []
+  },
+  "music": {
+   "items": [],
+   "subfolders": []
+  },
+  "video": {
+   "items": [],
+   "subfolders": []
+  },
+  "font": {
+   "items": [],
+   "subfolders": []
+  },
+  "icon": {
+   "items": [],
+   "subfolders": []
+  },
+  "general": {
+   "items": [],
+   "subfolders": []
+  }
+ },
+ "timelines": {
+  "items": [],
+  "subfolders": []
+ },
+ "properties": {
+  "description": "Munch the emoji that match the keyword!",
+  "version": "1.0.0.0",
+  "author": "",
+  "authorEmail": "",
+  "authorWebsite": "",
+  "appId": "",
+  "pixelRounding": true,
+  "zAxisScale": "normalized",
+  "fov": 0.7853981633974483,
+  "useLoaderLayout": false,
+  "fullscreenMode": "letterbox-scale",
+  "fullscreenQuality": "high",
+  "viewportFit": "auto",
+  "backgroundColor": [
+   0.1,
+   0.12,
+   0.22,
+   1
+  ],
+  "splashColor": [
+   1,
+   1,
+   1,
+   0
+  ],
+  "useThemeColor": false,
+  "themeColor": [
+   1,
+   1,
+   1,
+   0
+  ],
+  "orientations": "any",
+  "webgpu": "auto",
+  "gpuPreference": "high-performance",
+  "scriptsType": "module",
+  "framerateMode": "vsync",
+  "compositingMode": "standard",
+  "sampling": "nearest",
+  "downscaling": "medium",
+  "renderingMode": "auto",
+  "anisotropicFiltering": "auto",
+  "zNear": 1,
+  "zFar": 10000,
+  "maxSpriteSheetSize": 2048,
+  "loaderStyle": "splash",
+  "preloadSounds": true,
+  "cordovaiOSScheme": "app",
+  "cordovaAndroidScheme": "https",
+  "autoReloadScriptsOnPreview": false,
+  "exportFileStructure": "folders",
+  "uidAllocationMode": "increment"
+ },
+ "viewportWidth": 440,
+ "viewportHeight": 480,
+ "firstLayout": "Game"
+}

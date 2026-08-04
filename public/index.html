@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Emoji Munchers</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- ============ LOBBY SCREEN ============ -->
+<section id="screen-lobby" class="screen">
+  <div class="panel">
+    <h1>😋 Emoji Munchers</h1>
+    <p class="tag">Munch every emoji that matches the keyword. Multiplayer, same board, your own score.</p>
+
+    <label class="field">
+      <span>Username</span>
+      <input id="username" maxlength="20" placeholder="e.g. sid" autocomplete="off">
+    </label>
+
+    <div class="row">
+      <button id="createRoomBtn" class="btn primary">Create Room</button>
+    </div>
+
+    <div class="divider">or join a room</div>
+
+    <div class="row">
+      <input id="roomCode" maxlength="4" placeholder="ROOM CODE" autocomplete="off" style="text-transform:uppercase">
+      <button id="joinRoomBtn" class="btn">Join</button>
+    </div>
+
+    <p id="lobbyError" class="error"></p>
+  </div>
+</section>
+
+<!-- ============ WAITING ROOM ============ -->
+<section id="screen-waiting" class="screen hidden">
+  <div class="panel">
+    <h2>Room <span id="waitingCode" class="code"></span></h2>
+    <p class="tag">Share this code — everyone plays the same board.</p>
+    <ul id="waitingPlayers" class="player-list"></ul>
+    <button id="startGameBtn" class="btn primary hidden">Start Game</button>
+    <p id="waitingHint" class="tag"></p>
+  </div>
+</section>
+
+<!-- ============ GAME SCREEN ============ -->
+<section id="screen-game" class="screen hidden">
+  <div id="game">
+    <div id="topBar">
+      <button id="homeBtnGame" class="icon-btn" title="Leave to home" aria-label="Leave to home">🏠</button>
+      <div id="roundInfo">Round <span id="roundNum">1</span>/<span id="roundTotal">8</span></div>
+      <button id="muteBtn" class="icon-btn" title="Mute sound" aria-label="Mute sound">🔊</button>
+    </div>
+    <div id="keywordBanner">
+      <span id="keywordEyebrow">FIND</span>
+      <b id="keywordName">...</b>
+    </div>
+    <div id="timerBar"><div id="timerFill"></div></div>
+    <div id="boardWrap">
+      <div id="board"></div>
+    </div>
+    <div id="myStats">
+      <span id="myScore" class="stat-chip"><span class="stat-icon">💯</span><span id="myScoreVal">0</span></span>
+      <span id="myLives" class="stat-chip"></span>
+    </div>
+    <div id="hint">Arrow keys / WASD to move. Munch only the emoji that match the keyword!</div>
+    <div id="touchpad">
+      <span></span><button data-dir="up">▲</button><span></span>
+      <button data-dir="left">◀</button><button data-dir="down">▼</button><button data-dir="right">▶</button>
+    </div>
+  </div>
+  <aside id="scoreboard">
+    <h3>Scoreboard</h3>
+    <ul id="scoreboardList"></ul>
+  </aside>
+</section>
+
+<!-- ============ GAME OVER SCREEN ============ -->
+<section id="screen-over" class="screen hidden">
+  <div class="panel">
+    <h2>Game Over</h2>
+    <ul id="finalScoreboard" class="player-list"></ul>
+    <h3>All-time leaderboard</h3>
+    <ul id="leaderboardList" class="player-list small"></ul>
+    <button id="playAgainBtn" class="btn primary hidden">Play Again</button>
+    <button id="homeBtnOver" class="btn">🏠 Home</button>
+    <p id="overHint" class="tag"></p>
+  </div>
+</section>
+
+<script src="/socket.io/socket.io.js"></script>
+<script src="sfx.js"></script>
+<script src="client.js"></script>
+</body>
+</html>

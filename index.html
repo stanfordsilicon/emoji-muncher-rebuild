@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Emoji Munchers</title>
+<style>
+  :root {
+    --cell: 62px;
+    --cols: 7;
+    --rows: 6;
+    --bg: #1a1d2e;
+    --panel: #242844;
+    --grid-bg: #dce3f5;
+    --grid-border: #96a5cc;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; height: 100%;
+    background: var(--bg);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  #game {
+    width: calc(var(--cell) * var(--cols) + 20px);
+    user-select: none;
+  }
+  #hud {
+    background: var(--panel);
+    border-radius: 12px 12px 0 0;
+    padding: 10px 14px;
+    text-align: center;
+  }
+  #keyword {
+    font-size: 22px;
+    font-weight: 800;
+    letter-spacing: 0.5px;
+  }
+  #keyword b { color: #ffd54f; }
+  #stats {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 6px;
+    font-size: 14px;
+    font-weight: 700;
+  }
+  #score { color: #ffe082; }
+  #level { color: #b3e5fc; }
+  #lives { color: #ff8a80; }
+  #boardWrap {
+    position: relative;
+    background: var(--grid-bg);
+    border-radius: 0 0 12px 12px;
+    overflow: hidden;
+  }
+  #board {
+    position: relative;
+    width: calc(var(--cell) * var(--cols));
+    height: calc(var(--cell) * var(--rows));
+    margin: 0 auto;
+  }
+  .cell {
+    position: absolute;
+    width: calc(var(--cell) - 6px);
+    height: calc(var(--cell) - 6px);
+    margin: 3px;
+    background: #eef1fb;
+    border: 2px solid var(--grid-border);
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 30px;
+    transition: transform 0.12s ease, opacity 0.12s ease;
+  }
+  .cell.correct-flash { animation: pop 0.25s ease; }
+  .cell.wrong-flash { animation: shake 0.3s ease; border-color: #e57373; }
+  @keyframes pop {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.25); }
+    100% { transform: scale(0); opacity: 0; }
+  }
+  @keyframes shake {
+    0%, 100% { transform: translateX(0) scale(1); }
+    25% { transform: translateX(-4px) scale(0.95); }
+    75% { transform: translateX(4px) scale(0.95); }
+    100% { transform: scale(0); opacity: 0; }
+  }
+  .actor {
+    position: absolute;
+    width: calc(var(--cell) - 10px);
+    height: calc(var(--cell) - 10px);
+    margin: 5px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 34px;
+    transition: left 0.1s linear, top 0.1s linear;
+    z-index: 5;
+    filter: drop-shadow(0 2px 3px rgba(0,0,0,0.35));
+  }
+  #player { z-index: 6; }
+  #overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(10, 12, 24, 0.88);
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    z-index: 20;
+    border-radius: 0 0 12px 12px;
+  }
+  #overlay.show { display: flex; }
+  #overlay h2 { font-size: 30px; margin: 0 0 6px; color: #ff8a80; }
+  #overlay p { margin: 0 0 16px; color: #cfd4e6; }
+  #restartBtn {
+    background: #4caf6f;
+    border: none;
+    color: white;
+    font-size: 16px;
+    font-weight: 700;
+    padding: 12px 26px;
+    border-radius: 10px;
+    cursor: pointer;
+  }
+  #restartBtn:hover { background: #59c47f; }
+  #touchpad {
+    display: none;
+    margin-top: 14px;
+    grid-template-columns: repeat(3, 52px);
+    grid-template-rows: repeat(2, 52px);
+    gap: 6px;
+    justify-content: center;
+  }
+  #touchpad button {
+    font-size: 20px;
+    border-radius: 10px;
+    border: none;
+    background: #2f3457;
+    color: #fff;
+  }
+  #hint { text-align: center; color: #8891b5; font-size: 12px; margin-top: 8px; }
+  @media (max-width: 520px) {
+    #touchpad { display: grid; }
+  }
+</style>
+</head>
+<body>
+<div id="game">
+  <div id="hud">
+    <div id="keyword">Find: <b id="keywordName">...</b></div>
+    <div id="stats">
+      <span id="score">Score: 0</span>
+      <span id="level">Level: 1</span>
+      <span id="lives">Lives: 3</span>
+    </div>
+  </div>
+  <div id="boardWrap">
+    <div id="board">
+      <div id="overlay">
+        <h2>Game Over</h2>
+        <p id="finalScore"></p>
+        <button id="restartBtn">Play Again</button>
+      </div>
+    </div>
+  </div>
+  <div id="hint">Arrow keys / WASD to move. Munch only the emoji that match the keyword!</div>
+  <div id="touchpad">
+    <span></span><button data-dir="up">▲</button><span></span>
+    <button data-dir="left">◀</button><button data-dir="down">▼</button><button data-dir="right">▶</button>
+  </div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  // ---- Backend database: keyword categories and the emoji that belong to each ----
+  const DB = {
+    "Animals":     ["🐶","🐱","🦁","🐘","🐧","🐢","🦊","🐴"],
+    "Fruits":      ["🍎","🍌","🍇","🍓","🍍","🍑","🍉","🥝"],
+    "Vehicles":    ["🚗","🚕","🚌","🚓","🚑","🚒","🚀","🚁"],
+    "Sports":      ["⚽","🏀","🏈","⚾","🎾","🏐","🏓","🥊"],
+    "Weather":     ["🌞","🌧","⛄","🌈","⛈","❄","🌪","🌊"],
+    "Faces":       ["😀","😢","😡","😱","😴","🥳","😎","🤔"],
+    "Instruments": ["🎸","🎹","🥁","🎺","🎻","🎷","📯","🪗"],
+  };
+  const CATEGORIES = Object.keys(DB);
+  const ALL_EMOJI = CATEGORIES.flatMap(c => DB[c]);
+
+  function emojiCategory(e) {
+    for (const c of CATEGORIES) if (DB[c].includes(e)) return c;
+    return null;
+  }
+
+  // ---- Grid config ----
+  const COLS = 7, ROWS = 6, CELL = 62;
+  const boardEl = document.getElementById("board");
+  const overlayEl = document.getElementById("overlay");
+  const keywordEl = document.getElementById("keywordName");
+  const scoreEl = document.getElementById("score");
+  const levelEl = document.getElementById("level");
+  const livesEl = document.getElementById("lives");
+  const finalScoreEl = document.getElementById("finalScore");
+  const restartBtn = document.getElementById("restartBtn");
+
+  let state;
+
+  function cellCenter(col, row) {
+    return { x: col * CELL + CELL / 2, y: row * CELL + CELL / 2 };
+  }
+
+  function randInt(n) { return Math.floor(Math.random() * n); }
+
+  function pickKeyword(exclude) {
+    let k;
+    do { k = CATEGORIES[randInt(CATEGORIES.length)]; } while (k === exclude && CATEGORIES.length > 1);
+    return k;
+  }
+
+  function newGame() {
+    state = {
+      score: 0,
+      lives: 3,
+      level: 0,
+      keyword: null,
+      cells: [],       // {col,row,emoji,correct,el}
+      remaining: 0,
+      gameOver: false,
+      player: { col: 0, row: ROWS - 1, moveCooldown: 0 },
+      troggles: [],
+      keys: {},
+    };
+    scoreEl.textContent = "Score: 0";
+    livesEl.textContent = "Lives: 3";
+    overlayEl.classList.remove("show");
+
+    // clear any leftover cell elements
+    document.querySelectorAll(".cell").forEach(el => el.remove());
+
+    state.troggles = [
+      makeTroggle(COLS - 1, 0),
+      makeTroggle(COLS - 1, ROWS - 1),
+    ];
+
+    buildPlayerEl();
+    buildTroggleEls();
+    newRound();
+    requestAnimationFrame(tick);
+  }
+
+  function makeTroggle(col, row) {
+    return { col, row, moveTimer: 0, el: null };
+  }
+
+  let playerEl;
+  function buildPlayerEl() {
+    if (!playerEl) {
+      playerEl = document.createElement("div");
+      playerEl.id = "player";
+      playerEl.className = "actor";
+      playerEl.textContent = "😋";
+      boardEl.appendChild(playerEl);
+    }
+    positionActor(playerEl, state.player.col, state.player.row);
+  }
+
+  function buildTroggleEls() {
+    // Remove any troggle elements left over from a previous game (restart).
+    document.querySelectorAll(".troggle").forEach(el => el.remove());
+    for (const t of state.troggles) {
+      t.el = document.createElement("div");
+      t.el.className = "actor troggle";
+      t.el.textContent = "👾";
+      boardEl.appendChild(t.el);
+      positionActor(t.el, t.col, t.row);
+    }
+  }
+
+  function positionActor(el, col, row) {
+    el.style.left = (col * CELL) + "px";
+    el.style.top = (row * CELL) + "px";
+  }
+
+  function newRound() {
+    // remove old cells
+    state.cells.forEach(c => c.el && c.el.remove());
+    state.cells = [];
+    state.level += 1;
+    state.keyword = pickKeyword(state.keyword);
+    keywordEl.textContent = state.keyword;
+    levelEl.textContent = "Level: " + state.level;
+
+    let remaining = 0;
+    for (let row = 0; row < ROWS; row++) {
+      for (let col = 0; col < COLS; col++) {
+        const emoji = ALL_EMOJI[randInt(ALL_EMOJI.length)];
+        const correct = emojiCategory(emoji) === state.keyword;
+        if (correct) remaining++;
+        const el = document.createElement("div");
+        el.className = "cell";
+        el.textContent = emoji;
+        el.style.left = (col * CELL) + "px";
+        el.style.top = (row * CELL) + "px";
+        boardEl.insertBefore(el, playerEl);
+        state.cells.push({ col, row, emoji, correct, el });
+      }
+    }
+    state.remaining = remaining;
+    // Guarantee at least one correct answer exists so the round is always winnable.
+    if (remaining === 0) {
+      const c = state.cells[randInt(state.cells.length)];
+      const pool = DB[state.keyword];
+      c.emoji = pool[randInt(pool.length)];
+      c.correct = true;
+      c.el.textContent = c.emoji;
+      state.remaining = 1;
+    }
+  }
+
+  function cellAt(col, row) {
+    return state.cells.find(c => c.col === col && c.row === row);
+  }
+
+  function munch(cell) {
+    if (cell.correct) {
+      state.score += 10;
+      scoreEl.textContent = "Score: " + state.score;
+      cell.el.classList.add("correct-flash");
+      state.remaining -= 1;
+    } else {
+      loseLife();
+      cell.el.classList.add("wrong-flash");
+    }
+    const idx = state.cells.indexOf(cell);
+    state.cells.splice(idx, 1);
+    setTimeout(() => cell.el.remove(), 260);
+
+    if (state.remaining <= 0 && !state.gameOver) {
+      setTimeout(newRound, 300);
+    }
+  }
+
+  function loseLife() {
+    state.lives -= 1;
+    livesEl.textContent = "Lives: " + state.lives;
+    if (state.lives <= 0) endGame();
+  }
+
+  function endGame() {
+    state.gameOver = true;
+    finalScoreEl.textContent = "Final score: " + state.score + " · Level " + state.level;
+    overlayEl.classList.add("show");
+  }
+
+  function tryMove(dcol, drow) {
+    if (state.gameOver) return;
+    const nc = state.player.col + dcol;
+    const nr = state.player.row + drow;
+    if (nc < 0 || nc >= COLS || nr < 0 || nr >= ROWS) return;
+    state.player.col = nc;
+    state.player.row = nr;
+    positionActor(playerEl, nc, nr);
+    const c = cellAt(nc, nr);
+    if (c) munch(c);
+    checkTroggleCollision();
+  }
+
+  function checkTroggleCollision() {
+    for (const t of state.troggles) {
+      if (t.col === state.player.col && t.row === state.player.row) {
+        loseLife();
+        state.player.col = 0;
+        state.player.row = ROWS - 1;
+        positionActor(playerEl, state.player.col, state.player.row);
+        break;
+      }
+    }
+  }
+
+  function moveTroggle(t) {
+    const dirs = [[1,0],[-1,0],[0,1],[0,-1]];
+    const [dc, dr] = dirs[randInt(dirs.length)];
+    const nc = t.col + dc, nr = t.row + dr;
+    if (nc >= 0 && nc < COLS && nr >= 0 && nr < ROWS) {
+      t.col = nc; t.row = nr;
+      positionActor(t.el, nc, nr);
+    }
+    if (t.col === state.player.col && t.row === state.player.row && !state.gameOver) {
+      loseLife();
+      state.player.col = 0;
+      state.player.row = ROWS - 1;
+      positionActor(playerEl, state.player.col, state.player.row);
+    }
+  }
+
+  // ---- input ----
+  const KEY_DIRS = {
+    ArrowUp: [0, -1], ArrowDown: [0, 1], ArrowLeft: [-1, 0], ArrowRight: [1, 0],
+    w: [0, -1], s: [0, 1], a: [-1, 0], d: [1, 0],
+    W: [0, -1], S: [0, 1], A: [-1, 0], D: [1, 0],
+  };
+  window.addEventListener("keydown", (e) => {
+    const d = KEY_DIRS[e.key];
+    if (!d) return;
+    e.preventDefault();
+    if (state.player.moveCooldown > 0) return;
+    state.player.moveCooldown = 130;
+    tryMove(d[0], d[1]);
+  });
+
+  document.getElementById("touchpad").addEventListener("click", (e) => {
+    const btn = e.target.closest("button[data-dir]");
+    if (!btn) return;
+    const map = { up: [0,-1], down: [0,1], left: [-1,0], right: [1,0] };
+    tryMove(...map[btn.dataset.dir]);
+  });
+
+  restartBtn.addEventListener("click", newGame);
+
+  // ---- main loop ----
+  // Uses setInterval rather than requestAnimationFrame: rAF is fully paused by
+  // browsers when the tab/frame isn't the foregrounded, visible one, which
+  // would silently freeze troggle movement and the move-cooldown timer.
+  const TICK_MS = 50;
+  function tick() {
+    if (!state.gameOver) {
+      if (state.player.moveCooldown > 0) state.player.moveCooldown -= TICK_MS;
+      for (const trog of state.troggles) {
+        trog.moveTimer += TICK_MS;
+        if (trog.moveTimer > 900) {
+          trog.moveTimer = 0;
+          moveTroggle(trog);
+        }
+      }
+    }
+  }
+  setInterval(tick, TICK_MS);
+
+  newGame();
+})();
+</script>
+</body>
+</html>
