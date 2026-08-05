@@ -5,10 +5,11 @@ const { GameRoom } = require("./GameRoom");
 const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no 0/O/1/I
 
 class LobbyManager {
-  constructor({ config, emojiRepository, scoreRepository, io }) {
+  constructor({ config, emojiRepository, scoreRepository, analyticsRepository, io }) {
     this.config = config;
     this.emojiRepository = emojiRepository;
     this.scoreRepository = scoreRepository;
+    this.analyticsRepository = analyticsRepository;
     this.io = io;
     this.rooms = new Map(); // code -> GameRoom
     this.socketToRoom = new Map(); // socketId -> code
@@ -30,6 +31,7 @@ class LobbyManager {
       config: this.config,
       emojiRepository: this.emojiRepository,
       scoreRepository: this.scoreRepository,
+      analyticsRepository: this.analyticsRepository,
       emitToRoom,
     });
   }

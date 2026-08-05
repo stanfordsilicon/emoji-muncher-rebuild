@@ -6,7 +6,7 @@ const express = require("express");
 const { Server } = require("socket.io");
 
 const config = require("./config");
-const { emojiRepository, scoreRepository, DATA_BACKEND } = require("./data");
+const { emojiRepository, scoreRepository, analyticsRepository, DATA_BACKEND } = require("./data");
 const { LobbyManager } = require("./game/LobbyManager");
 
 const app = express();
@@ -16,11 +16,11 @@ const io = new Server(server);
 app.use(express.static(path.join(__dirname, "..", "public")));
 app.use(express.json());
 
-app.get("/api/leaderboard", (req, res) => {
-  res.json({ leaderboard: scoreRepository.getLeaderboard(20) });
+app.get("/api/leaderboard", async (req, res) => {
+  res.json({ leaderboard: await scoreRepository.getLeaderboard(20) });
 });
 
-const lobbyManager = new LobbyManager({ config, emojiRepository, scoreRepository, io });
+const lobbyManager = new LobbyManager({ config, emojiRepository, scoreRepository, analyticsRepository, io });
 
 function sendError(socket, message) {
   socket.emit("error_message", { message });

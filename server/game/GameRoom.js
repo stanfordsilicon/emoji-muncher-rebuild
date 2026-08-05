@@ -16,6 +16,8 @@ const CORNERS = [
   (cols, rows) => [cols - 1, rows - 1],
 ];
 
+const NEIGHBOR_OFFSETS = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+
 function clamp(v, lo, hi) {
   return Math.max(lo, Math.min(hi, v));
 }
@@ -27,13 +29,19 @@ function clamp(v, lo, hi) {
  * separate score/lives. The server is authoritative for movement and for
  * correctness (checked against emojiRepository) so a client can never
  * fake a correct answer.
+ *
+ * It also logs the QMoji analytics data points (session/round/event/summary)
+ * through analyticsRepository. Every analytics call is fire-and-forget --
+ * the repository itself swallows its own errors -- so a slow or unreachable
+ * database can never affect gameplay.
  */
 class GameRoom {
-  constructor(code, { config, emojiRepository, scoreRepository, emitToRoom }) {
+  constructor(code, { config, emojiRepository, scoreRepository, analyticsRepository, emitToRoom }) {
     this.code = code;
     this.config = config;
     this.emojiRepository = emojiRepository;
     this.scoreRepository = scoreRepository;
+    this.analyticsRepository = analyticsRepository;
     this.emitToRoom = emitToRoom; // (event, payload) => void, scoped to this room
 
     this.players = new Map(); // socketId -> player state
@@ -44,6 +52,13 @@ class GameRoom {
     this.grid = [];
     this.correctCount = 0;
     this.roundTimer = null;
+
+    this.sessionId = null;
+    this.sessionStartedAt = null;
+    this.roundStartedAt = null;
+    this.currentRoundId = null;
+    this._roundParticipants = new Set();
+    this._roundSummariesLoggedFor = null;
   }
 
   // ---- lobby ----
@@ -64,6 +79,11 @@ class GameRoom {
       eliminated: false,
       connected: true,
       lastMoveAt: 0,
+      // analytics bookkeeping, reset every round in _nextRound
+      eatOrder: 0,
+      lastActionAt: 0,
+      firstInputAt: null,
+      firstCorrectAt: null,
     });
     if (!this.hostSocketId) this.hostSocketId = socketId;
     this.scoreRepository.upsertPlayer(username);
@@ -92,11 +112,24 @@ class GameRoom {
     if (this.players.size === 0) throw new Error("Need at least one player");
     this.status = "playing";
     this.round = 0;
+    this.sessionId = `${this.code}-${Date.now()}`;
+    this.sessionStartedAt = new Date();
     for (const player of this.players.values()) {
       player.score = 0;
       player.lives = this.config.STARTING_LIVES;
       player.eliminated = false;
     }
+
+    this.analyticsRepository.recordSessionStart({
+      sessionId: this.sessionId,
+      roomCode: this.code,
+      game: "Emoji Munchers",
+      language: "en", // only language currently playable; revisit once localized
+      startedAt: this.sessionStartedAt,
+      totalRounds: this.config.ROUND_COUNT,
+      players: [...this.players.values()].map((p) => p.username),
+    });
+
     this._nextRound();
   }
 
@@ -107,12 +140,22 @@ class GameRoom {
     this.round = 0;
     this.keyword = null;
     this.grid = [];
+    this.sessionId = null;
+    this.sessionStartedAt = null;
+    this.roundStartedAt = null;
+    this.currentRoundId = null;
+    this._roundParticipants = new Set();
+    this._roundSummariesLoggedFor = null;
     for (const player of this.players.values()) {
       player.score = 0;
       player.lives = this.config.STARTING_LIVES;
       player.eliminated = false;
       player.roundDone = false;
       player.eaten = new Set();
+      player.eatOrder = 0;
+      player.lastActionAt = 0;
+      player.firstInputAt = null;
+      player.firstCorrectAt = null;
     }
   }
 
@@ -145,16 +188,48 @@ class GameRoom {
     const cell = this.grid[player.muncherRow * this.config.GRID_COLS + player.muncherCol];
     if (!cell) return;
 
+    const now = Date.now();
+    const decisionTimeMs = now - (player.lastActionAt || now);
+    const isFirstInput = player.firstInputAt === null;
+    if (isFirstInput) player.firstInputAt = now;
+    player.lastActionAt = now;
+
     player.eaten.add(key);
     const correct = this.emojiRepository.isMatch(cell.symbol, this.keyword);
+    player.eatOrder += 1;
+
+    let eventType = "eat";
     if (correct) {
       player.score += this.config.POINTS_PER_CORRECT;
       player.correctRemaining -= 1;
       if (player.correctRemaining <= 0) player.roundDone = true;
+      if (player.firstCorrectAt === null) player.firstCorrectAt = now;
     } else {
       player.lives -= 1;
-      if (player.lives <= 0) player.eliminated = true;
+      if (player.lives <= 0) {
+        player.eliminated = true;
+        eventType = "poison_triggered";
+      }
     }
+
+    this.analyticsRepository.recordEvent({
+      sessionId: this.sessionId,
+      roundId: this.currentRoundId,
+      roomCode: this.code,
+      type: eventType,
+      username: player.username,
+      keyword: this.keyword,
+      emoji: cell.symbol,
+      position: { col: cell.col, row: cell.row },
+      correct,
+      eatOrder: player.eatOrder,
+      timestamp: new Date(now),
+      decisionTimeMs,
+      timeToFirstInput: isFirstInput ? decisionTimeMs : null,
+      livesRemaining: player.lives,
+      scoreAfter: player.score,
+      failureSequence: eventType === "poison_triggered" ? player.eatOrder : null,
+    });
   }
 
   _activePlayers() {
@@ -175,6 +250,7 @@ class GameRoom {
   }
 
   _advanceAfterDelay() {
+    this._logRoundPlayerSummaries();
     this.emitToRoom("round_end", { round: this.round, players: this._publicPlayers() });
     setTimeout(() => this._nextRound(), 1200);
   }
@@ -187,7 +263,7 @@ class GameRoom {
       return;
     }
 
-    const { keyword, grid, correctCount } = generateRound(this.emojiRepository, {
+    const { keyword, grid, correctCount, difficulty } = generateRound(this.emojiRepository, {
       cols: this.config.GRID_COLS,
       rows: this.config.GRID_ROWS,
       minMatches: this.config.MIN_MATCHES_PER_KEYWORD,
@@ -197,9 +273,13 @@ class GameRoom {
     this.keyword = keyword;
     this.grid = grid;
     this.correctCount = correctCount;
+    this.roundStartedAt = new Date();
+    this.currentRoundId = `${this.sessionId}-r${this.round}`;
+    this._roundSummariesLoggedFor = null;
+    this._roundParticipants = new Set();
 
     let i = 0;
-    for (const player of this.players.values()) {
+    for (const [socketId, player] of this.players) {
       if (player.eliminated) continue;
       const [sc, sr] = CORNERS[i % CORNERS.length](this.config.GRID_COLS, this.config.GRID_ROWS);
       player.muncherCol = sc;
@@ -207,8 +287,32 @@ class GameRoom {
       player.eaten = new Set();
       player.correctRemaining = correctCount;
       player.roundDone = false;
+      player.eatOrder = 0;
+      player.lastActionAt = this.roundStartedAt.getTime();
+      player.firstInputAt = null;
+      player.firstCorrectAt = null;
+      this._roundParticipants.add(socketId);
       i += 1;
     }
+
+    this.analyticsRepository.recordRound({
+      roundId: this.currentRoundId,
+      sessionId: this.sessionId,
+      roomCode: this.code,
+      roundNumber: this.round,
+      keyword,
+      board: grid,
+      totalCells: this.config.GRID_COLS * this.config.GRID_ROWS,
+      correctCount,
+      safeRatio: difficulty.safeRatio,
+      poisonRatio: difficulty.poisonRatio,
+      avgSafeChoicesPerMove: difficulty.avgSafeChoicesPerMove,
+      narrowPathIndicator: difficulty.narrowPathIndicator,
+      safeClusterCount: difficulty.safeClusterCount,
+      datasetVersion: "qmoji-csv-v1", // no inference/poison-selection model yet; static curated dataset
+      startedAt: this.roundStartedAt,
+      emojiMeta: this._emojiMetaForGrid(grid, keyword),
+    });
 
     this.emitToRoom("round_start", this._publicRoundPayload());
     this.roundTimer = setTimeout(() => {
@@ -216,15 +320,97 @@ class GameRoom {
     }, this.config.ROUND_TIME_MS);
   }
 
-  _endGame() {
-    this._clearTimer();
-    this.status = "gameOver";
-    for (const player of this.players.values()) {
-      this.scoreRepository.recordMatchResult(player.username, player.score);
+  // "Negative Evidence": for each player, which correct emoji sat right next
+  // to a cell they actually visited but never ate. Logged once per round,
+  // guarded so it never double-fires whether the round ended naturally
+  // (_advanceAfterDelay) or abruptly (everyone eliminated mid-round, straight
+  // into _endGame).
+  _logRoundPlayerSummaries() {
+    if (!this.currentRoundId || !this.roundStartedAt) return;
+    if (this._roundSummariesLoggedFor === this.currentRoundId) return;
+    this._roundSummariesLoggedFor = this.currentRoundId;
+
+    const roundStart = this.roundStartedAt.getTime();
+    const cols = this.config.GRID_COLS;
+    const correctCells = this.grid.filter((c) => this.emojiRepository.isMatch(c.symbol, this.keyword));
+
+    for (const socketId of this._roundParticipants) {
+      const player = this.players.get(socketId);
+      if (!player) continue;
+
+      let correctEaten = 0;
+      let wrongEaten = 0;
+      for (const key of player.eaten) {
+        const [col, row] = key.split(",").map(Number);
+        const cell = this.grid[row * cols + col];
+        if (cell && this.emojiRepository.isMatch(cell.symbol, this.keyword)) correctEaten += 1;
+        else wrongEaten += 1;
+      }
+
+      const nearbyInferredNotEaten = correctCells
+        .filter((c) => !player.eaten.has(`${c.col},${c.row}`))
+        .filter((c) => NEIGHBOR_OFFSETS.some(([dc, dr]) => player.eaten.has(`${c.col + dc},${c.row + dr}`)))
+        .map((c) => ({ symbol: c.symbol, col: c.col, row: c.row }));
+
+      this.analyticsRepository.recordRoundPlayerSummary({
+        sessionId: this.sessionId,
+        roundId: this.currentRoundId,
+        roomCode: this.code,
+        username: player.username,
+        correctEaten,
+        wrongEaten,
+        eatOrderCount: player.eatOrder,
+        timeToFirstInput: player.firstInputAt !== null ? player.firstInputAt - roundStart : null,
+        timeToCorrectAnswer: player.firstCorrectAt !== null ? player.firstCorrectAt - roundStart : null,
+        eliminated: player.eliminated,
+        failureSequence: player.eliminated ? player.eatOrder : null,
+        nearbyInferredNotEaten,
+        finalScore: player.score,
+      });
     }
+  }
+
+  _emojiMetaForGrid(grid, keyword) {
+    const seen = new Map();
+    for (const cell of grid) {
+      if (!seen.has(cell.symbol)) {
+        seen.set(cell.symbol, {
+          symbol: cell.symbol,
+          // Every keyword-emoji pair in the current dataset came directly
+          // from the user-submitted CSV, so there is no "inferred" layer
+          // yet -- this flag is a placeholder for when/if one is added.
+          confirmedOrInferred: "confirmed",
+          poisonStatus: this.emojiRepository.isMatch(cell.symbol, keyword) ? "safe" : "poison",
+        });
+      }
+    }
+    return [...seen.values()];
+  }
+
+  async _endGame() {
+    this._clearTimer();
+    this._logRoundPlayerSummaries();
+    this.status = "gameOver";
+
+    const endedAt = new Date();
+    const durationMs = this.sessionStartedAt ? endedAt.getTime() - this.sessionStartedAt.getTime() : null;
+
+    for (const player of this.players.values()) {
+      await this.scoreRepository.recordMatchResult(player.username, player.score);
+    }
+
+    if (this.sessionId) {
+      this.analyticsRepository.recordSessionEnd(this.sessionId, {
+        endedAt,
+        durationMs,
+        finalScoreboard: this._publicPlayers(),
+      });
+    }
+
+    const leaderboard = await this.scoreRepository.getLeaderboard(10);
     this.emitToRoom("game_over", {
       players: this._publicPlayers(),
-      leaderboard: this.scoreRepository.getLeaderboard(10),
+      leaderboard,
     });
   }
 

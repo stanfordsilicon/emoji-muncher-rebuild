@@ -55,6 +55,67 @@ function ensureReachableFromEverySpawn(grid, { cols, rows, keyword, matchingSymb
   }
 }
 
+const NEIGHBOR_DELTAS = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+
+/**
+ * Difficulty stats for the "Difficulty" CSV category. `numberOfSafePaths` has
+ * no single agreed-upon definition for a free-roam (not turn-by-turn maze)
+ * board, so it's approximated here as the count of 4-connected clusters of
+ * correct cells -- i.e. how many separate "safe regions" a player has to
+ * find, rather than true path enumeration. avgSafeChoicesPerMove and
+ * narrowPathIndicator are exact given that approximation.
+ */
+function computeDifficultyStats(grid, keyword, emojiRepository, cols, rows) {
+  const byKey = new Map(grid.map((c) => [`${c.col},${c.row}`, c]));
+  const isCorrect = (c) => emojiRepository.isMatch(c.symbol, keyword);
+  const correctCells = grid.filter(isCorrect);
+
+  const neighborCorrectCounts = correctCells.map((c) => {
+    let n = 0;
+    for (const [dc, dr] of NEIGHBOR_DELTAS) {
+      const nb = byKey.get(`${c.col + dc},${c.row + dr}`);
+      if (nb && isCorrect(nb)) n += 1;
+    }
+    return n;
+  });
+
+  const avgSafeChoicesPerMove =
+    neighborCorrectCounts.length > 0
+      ? neighborCorrectCounts.reduce((a, b) => a + b, 0) / neighborCorrectCounts.length
+      : 0;
+  const narrowPathIndicator = correctCells.length > 0 && Math.min(...neighborCorrectCounts) <= 1;
+
+  const visited = new Set();
+  let safeClusterCount = 0;
+  for (const start of correctCells) {
+    const startKey = `${start.col},${start.row}`;
+    if (visited.has(startKey)) continue;
+    safeClusterCount += 1;
+    const stack = [start];
+    visited.add(startKey);
+    while (stack.length > 0) {
+      const cur = stack.pop();
+      for (const [dc, dr] of NEIGHBOR_DELTAS) {
+        const nbKey = `${cur.col + dc},${cur.row + dr}`;
+        const nb = byKey.get(nbKey);
+        if (nb && isCorrect(nb) && !visited.has(nbKey)) {
+          visited.add(nbKey);
+          stack.push(nb);
+        }
+      }
+    }
+  }
+
+  const totalCells = cols * rows;
+  return {
+    safeRatio: correctCells.length / totalCells,
+    poisonRatio: (totalCells - correctCells.length) / totalCells,
+    avgSafeChoicesPerMove,
+    narrowPathIndicator,
+    safeClusterCount,
+  };
+}
+
 /**
  * Builds one round: a keyword plus a COLS x ROWS grid of emoji symbols,
  * with a controlled number of cells that correctly match the keyword
@@ -97,8 +158,9 @@ function generateRound(emojiRepository, { cols, rows, minMatches, maxMatches, sp
   // Recount from the final grid -- the safe-spawn repair above can add
   // correct cells beyond targetCorrect, so this is the only accurate figure.
   const correctCount = grid.filter((c) => emojiRepository.isMatch(c.symbol, keyword)).length;
+  const difficulty = computeDifficultyStats(grid, keyword, emojiRepository, cols, rows);
 
-  return { keyword, grid, correctCount };
+  return { keyword, grid, correctCount, difficulty };
 }
 
 module.exports = { generateRound, shuffle, randomBetween };

@@ -2,19 +2,26 @@
 
 const { createEmojiRepository } = require("./EmojiRepository");
 const { createScoreRepository } = require("./ScoreRepository");
+const { createAnalyticsRepository } = require("./AnalyticsRepository");
 
 /**
  * Single place that decides which storage backend the game talks to.
- * Right now both repositories are in-memory. To move to MongoDB later:
- *   1. Write MongoEmojiRepository / MongoScoreRepository implementing the
- *      same method signatures documented in EmojiRepository.js / ScoreRepository.js.
- *   2. Add a "mongo" case to createEmojiRepository / createScoreRepository.
- *   3. Set DATA_BACKEND=mongo (and MONGODB_URI) in the environment.
- * Nothing in server.js, LobbyManager, or GameRoom needs to change.
+ *
+ * DATA_BACKEND=memory (default): scores and analytics live only in this
+ *   process's memory and are lost on restart -- fine for local dev.
+ * DATA_BACKEND=mongo: scores and analytics are written to MongoDB via
+ *   MONGODB_URI. Nothing in server.js, LobbyManager, or GameRoom changes
+ *   either way -- they only ever call the repository interface.
+ *
+ * The emoji/keyword dataset (EmojiRepository) is deliberately always
+ * in-memory, loaded from emojiData.json -- it's the static "backend
+ * database" used for correctness-checking, not a thing we collect data
+ * into, so it has no mongo variant.
  */
 const DATA_BACKEND = process.env.DATA_BACKEND || "memory";
 
-const emojiRepository = createEmojiRepository({ backend: DATA_BACKEND });
+const emojiRepository = createEmojiRepository({ backend: "memory" });
 const scoreRepository = createScoreRepository({ backend: DATA_BACKEND });
+const analyticsRepository = createAnalyticsRepository({ backend: DATA_BACKEND });
 
-module.exports = { emojiRepository, scoreRepository, DATA_BACKEND };
+module.exports = { emojiRepository, scoreRepository, analyticsRepository, DATA_BACKEND };
