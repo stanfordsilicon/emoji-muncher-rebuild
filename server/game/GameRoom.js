@@ -30,10 +30,13 @@ function clamp(v, lo, hi) {
  * correctness (checked against emojiRepository) so a client can never
  * fake a correct answer.
  *
- * It also logs the QMoji analytics data points (session/round/event/summary)
- * through analyticsRepository. Every analytics call is fire-and-forget --
- * the repository itself swallows its own errors -- so a slow or unreachable
- * database can never affect gameplay.
+ * It also accumulates the QMoji analytics data points for each player as
+ * the match plays out (player.matchLog), then flushes one complete
+ * "gamesessions" document per player at game-over via analyticsRepository
+ * -- matching the one-document-per-player-per-match shape used by the other
+ * QMoji mini-games, rather than writing many small documents as events
+ * happen. That flush is fire-and-forget: the repository swallows its own
+ * errors, so a slow or unreachable database can never affect gameplay.
  */
 class GameRoom {
   constructor(code, { config, emojiRepository, scoreRepository, analyticsRepository, emitToRoom }) {
@@ -53,12 +56,9 @@ class GameRoom {
     this.correctCount = 0;
     this.roundTimer = null;
 
-    this.sessionId = null;
-    this.sessionStartedAt = null;
+    this.gameStartedAt = null;
     this.roundStartedAt = null;
-    this.currentRoundId = null;
-    this._roundParticipants = new Set();
-    this._roundSummariesLoggedFor = null;
+    this._roundFinalizedFor = -1; // round number already finalized, guards double-finalization
   }
 
   // ---- lobby ----
@@ -79,11 +79,13 @@ class GameRoom {
       eliminated: false,
       connected: true,
       lastMoveAt: 0,
-      // analytics bookkeeping, reset every round in _nextRound
+      // analytics bookkeeping, reset every match/round below
       eatOrder: 0,
       lastActionAt: 0,
       firstInputAt: null,
       firstCorrectAt: null,
+      currentRoundEntry: null,
+      matchLog: { rounds: [] },
     });
     if (!this.hostSocketId) this.hostSocketId = socketId;
     this.scoreRepository.upsertPlayer(username);
@@ -112,24 +114,14 @@ class GameRoom {
     if (this.players.size === 0) throw new Error("Need at least one player");
     this.status = "playing";
     this.round = 0;
-    this.sessionId = `${this.code}-${Date.now()}`;
-    this.sessionStartedAt = new Date();
+    this.gameStartedAt = new Date();
+    this._roundFinalizedFor = -1;
     for (const player of this.players.values()) {
       player.score = 0;
       player.lives = this.config.STARTING_LIVES;
       player.eliminated = false;
+      player.matchLog = { rounds: [] };
     }
-
-    this.analyticsRepository.recordSessionStart({
-      sessionId: this.sessionId,
-      roomCode: this.code,
-      game: "Emoji Munchers",
-      language: "en", // only language currently playable; revisit once localized
-      startedAt: this.sessionStartedAt,
-      totalRounds: this.config.ROUND_COUNT,
-      players: [...this.players.values()].map((p) => p.username),
-    });
-
     this._nextRound();
   }
 
@@ -140,12 +132,9 @@ class GameRoom {
     this.round = 0;
     this.keyword = null;
     this.grid = [];
-    this.sessionId = null;
-    this.sessionStartedAt = null;
+    this.gameStartedAt = null;
     this.roundStartedAt = null;
-    this.currentRoundId = null;
-    this._roundParticipants = new Set();
-    this._roundSummariesLoggedFor = null;
+    this._roundFinalizedFor = -1;
     for (const player of this.players.values()) {
       player.score = 0;
       player.lives = this.config.STARTING_LIVES;
@@ -156,6 +145,8 @@ class GameRoom {
       player.lastActionAt = 0;
       player.firstInputAt = null;
       player.firstCorrectAt = null;
+      player.currentRoundEntry = null;
+      player.matchLog = { rounds: [] };
     }
   }
 
@@ -198,7 +189,6 @@ class GameRoom {
     const correct = this.emojiRepository.isMatch(cell.symbol, this.keyword);
     player.eatOrder += 1;
 
-    let eventType = "eat";
     if (correct) {
       player.score += this.config.POINTS_PER_CORRECT;
       player.correctRemaining -= 1;
@@ -206,30 +196,22 @@ class GameRoom {
       if (player.firstCorrectAt === null) player.firstCorrectAt = now;
     } else {
       player.lives -= 1;
-      if (player.lives <= 0) {
-        player.eliminated = true;
-        eventType = "poison_triggered";
-      }
+      if (player.lives <= 0) player.eliminated = true;
     }
 
-    this.analyticsRepository.recordEvent({
-      sessionId: this.sessionId,
-      roundId: this.currentRoundId,
-      roomCode: this.code,
-      type: eventType,
-      username: player.username,
-      keyword: this.keyword,
-      emoji: cell.symbol,
-      position: { col: cell.col, row: cell.row },
-      correct,
-      eatOrder: player.eatOrder,
-      timestamp: new Date(now),
-      decisionTimeMs,
-      timeToFirstInput: isFirstInput ? decisionTimeMs : null,
-      livesRemaining: player.lives,
-      scoreAfter: player.score,
-      failureSequence: eventType === "poison_triggered" ? player.eatOrder : null,
-    });
+    if (player.currentRoundEntry) {
+      player.currentRoundEntry.eats.push({
+        emoji: cell.symbol,
+        col: cell.col,
+        row: cell.row,
+        correct,
+        eatOrder: player.eatOrder,
+        timestamp: new Date(now),
+        decisionTimeMs,
+        livesRemaining: player.lives,
+        scoreAfter: player.score,
+      });
+    }
   }
 
   _activePlayers() {
@@ -250,7 +232,7 @@ class GameRoom {
   }
 
   _advanceAfterDelay() {
-    this._logRoundPlayerSummaries();
+    this._finalizeCurrentRoundLogs();
     this.emitToRoom("round_end", { round: this.round, players: this._publicPlayers() });
     setTimeout(() => this._nextRound(), 1200);
   }
@@ -274,12 +256,11 @@ class GameRoom {
     this.grid = grid;
     this.correctCount = correctCount;
     this.roundStartedAt = new Date();
-    this.currentRoundId = `${this.sessionId}-r${this.round}`;
-    this._roundSummariesLoggedFor = null;
-    this._roundParticipants = new Set();
+
+    const emojiMeta = this._emojiMetaForGrid(grid, keyword);
 
     let i = 0;
-    for (const [socketId, player] of this.players) {
+    for (const player of this.players.values()) {
       if (player.eliminated) continue;
       const [sc, sr] = CORNERS[i % CORNERS.length](this.config.GRID_COLS, this.config.GRID_ROWS);
       player.muncherCol = sc;
@@ -291,28 +272,35 @@ class GameRoom {
       player.lastActionAt = this.roundStartedAt.getTime();
       player.firstInputAt = null;
       player.firstCorrectAt = null;
-      this._roundParticipants.add(socketId);
+
+      player.currentRoundEntry = {
+        roundNumber: this.round,
+        keyword,
+        board: grid.map((c) => ({ col: c.col, row: c.row, symbol: c.symbol })),
+        totalCells: this.config.GRID_COLS * this.config.GRID_ROWS,
+        correctCount,
+        safeRatio: difficulty.safeRatio,
+        poisonRatio: difficulty.poisonRatio,
+        avgSafeChoicesPerMove: difficulty.avgSafeChoicesPerMove,
+        narrowPathIndicator: difficulty.narrowPathIndicator,
+        safeClusterCount: difficulty.safeClusterCount,
+        datasetVersion: "qmoji-csv-v1", // no inference/poison-selection model yet; static curated dataset
+        emojiMeta,
+        startedAt: this.roundStartedAt,
+        endedAt: null,
+        durationMs: null,
+        eats: [],
+        correctEaten: 0,
+        wrongEaten: 0,
+        timeToFirstInput: null,
+        timeToCorrectAnswer: null,
+        eliminated: false,
+        failureSequence: null,
+        nearbyInferredNotEaten: [],
+      };
+      player.matchLog.rounds.push(player.currentRoundEntry);
       i += 1;
     }
-
-    this.analyticsRepository.recordRound({
-      roundId: this.currentRoundId,
-      sessionId: this.sessionId,
-      roomCode: this.code,
-      roundNumber: this.round,
-      keyword,
-      board: grid,
-      totalCells: this.config.GRID_COLS * this.config.GRID_ROWS,
-      correctCount,
-      safeRatio: difficulty.safeRatio,
-      poisonRatio: difficulty.poisonRatio,
-      avgSafeChoicesPerMove: difficulty.avgSafeChoicesPerMove,
-      narrowPathIndicator: difficulty.narrowPathIndicator,
-      safeClusterCount: difficulty.safeClusterCount,
-      datasetVersion: "qmoji-csv-v1", // no inference/poison-selection model yet; static curated dataset
-      startedAt: this.roundStartedAt,
-      emojiMeta: this._emojiMetaForGrid(grid, keyword),
-    });
 
     this.emitToRoom("round_start", this._publicRoundPayload());
     this.roundTimer = setTimeout(() => {
@@ -321,22 +309,22 @@ class GameRoom {
   }
 
   // "Negative Evidence": for each player, which correct emoji sat right next
-  // to a cell they actually visited but never ate. Logged once per round,
-  // guarded so it never double-fires whether the round ended naturally
-  // (_advanceAfterDelay) or abruptly (everyone eliminated mid-round, straight
-  // into _endGame).
-  _logRoundPlayerSummaries() {
-    if (!this.currentRoundId || !this.roundStartedAt) return;
-    if (this._roundSummariesLoggedFor === this.currentRoundId) return;
-    this._roundSummariesLoggedFor = this.currentRoundId;
+  // to a cell they actually visited but never ate. Finalizes each player's
+  // in-memory round entry (no DB write here -- that happens once, in bulk,
+  // at game-over); guarded so it never runs twice for the same round
+  // whether it ends naturally (_advanceAfterDelay) or abruptly (everyone
+  // eliminated mid-round, straight into _endGame).
+  _finalizeCurrentRoundLogs() {
+    if (!this.roundStartedAt || this._roundFinalizedFor === this.round) return;
+    this._roundFinalizedFor = this.round;
 
     const roundStart = this.roundStartedAt.getTime();
     const cols = this.config.GRID_COLS;
     const correctCells = this.grid.filter((c) => this.emojiRepository.isMatch(c.symbol, this.keyword));
 
-    for (const socketId of this._roundParticipants) {
-      const player = this.players.get(socketId);
-      if (!player) continue;
+    for (const player of this.players.values()) {
+      const entry = player.currentRoundEntry;
+      if (!entry || entry.roundNumber !== this.round) continue;
 
       let correctEaten = 0;
       let wrongEaten = 0;
@@ -352,21 +340,16 @@ class GameRoom {
         .filter((c) => NEIGHBOR_OFFSETS.some(([dc, dr]) => player.eaten.has(`${c.col + dc},${c.row + dr}`)))
         .map((c) => ({ symbol: c.symbol, col: c.col, row: c.row }));
 
-      this.analyticsRepository.recordRoundPlayerSummary({
-        sessionId: this.sessionId,
-        roundId: this.currentRoundId,
-        roomCode: this.code,
-        username: player.username,
-        correctEaten,
-        wrongEaten,
-        eatOrderCount: player.eatOrder,
-        timeToFirstInput: player.firstInputAt !== null ? player.firstInputAt - roundStart : null,
-        timeToCorrectAnswer: player.firstCorrectAt !== null ? player.firstCorrectAt - roundStart : null,
-        eliminated: player.eliminated,
-        failureSequence: player.eliminated ? player.eatOrder : null,
-        nearbyInferredNotEaten,
-        finalScore: player.score,
-      });
+      const endedAt = new Date();
+      entry.endedAt = endedAt;
+      entry.durationMs = endedAt.getTime() - roundStart;
+      entry.correctEaten = correctEaten;
+      entry.wrongEaten = wrongEaten;
+      entry.timeToFirstInput = player.firstInputAt !== null ? player.firstInputAt - roundStart : null;
+      entry.timeToCorrectAnswer = player.firstCorrectAt !== null ? player.firstCorrectAt - roundStart : null;
+      entry.eliminated = player.eliminated;
+      entry.failureSequence = player.eliminated ? player.eatOrder : null;
+      entry.nearbyInferredNotEaten = nearbyInferredNotEaten;
     }
   }
 
@@ -389,21 +372,29 @@ class GameRoom {
 
   async _endGame() {
     this._clearTimer();
-    this._logRoundPlayerSummaries();
+    this._finalizeCurrentRoundLogs();
     this.status = "gameOver";
 
-    const endedAt = new Date();
-    const durationMs = this.sessionStartedAt ? endedAt.getTime() - this.sessionStartedAt.getTime() : null;
+    const gameEndedAt = new Date();
+    const totalDurationMs = this.gameStartedAt ? gameEndedAt.getTime() - this.gameStartedAt.getTime() : null;
+    const allUsernames = [...this.players.values()].map((p) => p.username);
 
     for (const player of this.players.values()) {
       await this.scoreRepository.recordMatchResult(player.username, player.score);
-    }
 
-    if (this.sessionId) {
-      this.analyticsRepository.recordSessionEnd(this.sessionId, {
-        endedAt,
-        durationMs,
-        finalScoreboard: this._publicPlayers(),
+      this.analyticsRepository.recordGameSession({
+        username: player.username,
+        roomCode: this.code,
+        game: "Emoji Munchers",
+        language: "en", // only language currently playable; revisit once localized
+        gameStartedAt: this.gameStartedAt,
+        gameEndedAt,
+        totalDurationMs,
+        rounds: player.matchLog.rounds,
+        finalScore: player.score,
+        finalLives: player.lives,
+        eliminated: player.eliminated,
+        otherPlayers: allUsernames.filter((u) => u !== player.username),
       });
     }
 

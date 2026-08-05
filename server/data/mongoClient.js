@@ -17,7 +17,7 @@ function getMongoDb() {
   if (!clientPromise) {
     const uri = process.env.MONGODB_URI;
     if (!uri) throw new Error("MONGODB_URI is not set");
-    const dbName = process.env.MONGODB_DB_NAME || "emoji_munchers";
+    const dbName = process.env.MONGODB_DB_NAME || "emojimunchers_data";
     const client = new MongoClient(uri);
     clientPromise = client.connect().then((c) => c.db(dbName));
   }

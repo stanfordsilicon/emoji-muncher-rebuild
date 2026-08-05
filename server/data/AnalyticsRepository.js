@@ -5,69 +5,34 @@ const { getMongoDb } = require("./mongoClient");
 /**
  * Repository interface for the QMoji analytics data points (see the
  * "Emoji Munchers" + "Global" rows of the data-capture-targets sheet).
- * Append-only by design: raw per-action events go in `events`, with
- * `sessions` / `rounds` / `round_player_summaries` holding the
- * higher-level documents analysts actually query.
  *
- *   recordSessionStart(session)          -> sessionId
- *   recordSessionEnd(sessionId, patch)   -> void
- *   recordRound(round)                   -> void
- *   recordEvent(event)                   -> void
- *   recordRoundPlayerSummary(summary)    -> void
+ * One call per player per completed match: `recordGameSession(doc)`.
+ * GameRoom accumulates everything that happened for a player (every round,
+ * every munch, every difficulty stat) in memory as the match plays out, then
+ * flushes one complete document at game-over -- mirroring the shape used by
+ * the other QMoji mini-games (e.g. oddoneout_data.gamesessions), so all of
+ * them can be queried the same way: one row per player per session, with
+ * that player's rounds nested inside.
  *
- * All calls must be safe to fire-and-forget: analytics failures must never
- * break gameplay, so every method swallows its own errors (logged, not
- * thrown) instead of propagating them into GameRoom.
+ *   recordGameSession(doc) -> Promise<void>
+ *
+ * Must be safe to fire-and-forget: analytics failures can never break
+ * gameplay, so the Mongo implementation swallows its own errors (logged,
+ * not thrown) instead of propagating them into GameRoom.
  */
 class InMemoryAnalyticsRepository {
   // No MONGODB_URI configured yet -- analytics are simply not collected.
-  // Every method is a deliberate no-op so the game runs identically with
-  // or without a database attached.
-  async recordSessionStart() {}
-  async recordSessionEnd() {}
-  async recordRound() {}
-  async recordEvent() {}
-  async recordRoundPlayerSummary() {}
+  async recordGameSession() {}
 }
 
 class MongoAnalyticsRepository {
-  async _col(name) {
-    const db = await getMongoDb();
-    return db.collection(name);
-  }
-
-  async _safeInsert(collectionName, doc) {
+  async recordGameSession(doc) {
     try {
-      const col = await this._col(collectionName);
-      await col.insertOne(doc);
+      const db = await getMongoDb();
+      await db.collection("gamesessions").insertOne(doc);
     } catch (err) {
-      console.error(`[analytics] failed to write ${collectionName}:`, err.message);
+      console.error("[analytics] failed to write gamesessions:", err.message);
     }
-  }
-
-  async recordSessionStart(session) {
-    await this._safeInsert("sessions", session);
-  }
-
-  async recordSessionEnd(sessionId, patch) {
-    try {
-      const col = await this._col("sessions");
-      await col.updateOne({ sessionId }, { $set: patch });
-    } catch (err) {
-      console.error("[analytics] failed to close session:", err.message);
-    }
-  }
-
-  async recordRound(round) {
-    await this._safeInsert("rounds", round);
-  }
-
-  async recordEvent(event) {
-    await this._safeInsert("events", event);
-  }
-
-  async recordRoundPlayerSummary(summary) {
-    await this._safeInsert("round_player_summaries", summary);
   }
 }
 
