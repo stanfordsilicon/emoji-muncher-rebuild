@@ -296,6 +296,8 @@ class GameRoom {
         timeToCorrectAnswer: null,
         eliminated: false,
         failureSequence: null,
+        poisonEmojiTriggered: null,
+        poisonTimestamp: null,
         nearbyInferredNotEaten: [],
       };
       player.matchLog.rounds.push(player.currentRoundEntry);
@@ -350,6 +352,16 @@ class GameRoom {
       entry.eliminated = player.eliminated;
       entry.failureSequence = player.eliminated ? player.eatOrder : null;
       entry.nearbyInferredNotEaten = nearbyInferredNotEaten;
+
+      // Elimination stops the player from moving again (see move()), so the
+      // last logged munch is always exactly the poison emoji that ended them.
+      if (player.eliminated) {
+        const lastEat = entry.eats[entry.eats.length - 1];
+        if (lastEat && !lastEat.correct) {
+          entry.poisonEmojiTriggered = lastEat.emoji;
+          entry.poisonTimestamp = lastEat.timestamp;
+        }
+      }
     }
   }
 
