@@ -13,8 +13,14 @@ function randomBetween(min, max) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
-function manhattan(cell, corner) {
-  return Math.abs(cell.col - corner.col) + Math.abs(cell.row - corner.row);
+const NEIGHBOR_DELTAS = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+
+function key(col, row) {
+  return `${col},${row}`;
+}
+
+function manhattan(a, b) {
+  return Math.abs(a.col - b.col) + Math.abs(a.row - b.row);
 }
 
 // Players always spawn at one of these four corners (see GameRoom's CORNERS).
@@ -28,52 +34,112 @@ function spawnCorners(cols, rows) {
 }
 
 /**
- * Random placement alone can (unluckily) put every correct-matching cell far
- * from a player's spawn corner, forcing several guaranteed-wrong munches
- * before they can even reach a real match -- a "spawn killed" round that was
- * never fair to begin with. This repairs that: for each spawn corner, if no
- * correct cell exists within `radius` moves, it converts the nearest cell in
- * that zone into a correct match. The corner cell itself is never touched
- * since a player's starting cell is never auto-munched.
+ * Grows one connected region of `size` cells via random walk from a roughly
+ * central seed, so every correct-matching cell ends up reachable from every
+ * other correct cell without crossing a single poison cell. This is what
+ * makes the board solvable at all: once a player reaches this region, they
+ * can clear every remaining correct cell for free.
  */
-function ensureReachableFromEverySpawn(grid, { cols, rows, keyword, matchingSymbols, emojiRepository, radius }) {
-  if (matchingSymbols.length === 0) return;
+function growConnectedBlob(cols, rows, size) {
+  const seed = {
+    col: Math.min(cols - 1, Math.max(0, Math.floor(cols / 2) + randomBetween(-1, 1))),
+    row: Math.min(rows - 1, Math.max(0, Math.floor(rows / 2) + randomBetween(-1, 1))),
+  };
+  const blob = new Map(); // key -> {col,row}
+  blob.set(key(seed.col, seed.row), seed);
+  const frontier = new Map(); // key -> {col,row}, candidates adjacent to the blob
 
-  for (const corner of spawnCorners(cols, rows)) {
-    const zone = grid.filter((c) => {
-      const d = manhattan(c, corner);
-      return d >= 1 && d <= radius;
-    });
-    if (zone.length === 0) continue;
+  const addFrontierNeighbors = (cell) => {
+    for (const [dc, dr] of NEIGHBOR_DELTAS) {
+      const nc = cell.col + dc;
+      const nr = cell.row + dr;
+      if (nc < 0 || nc >= cols || nr < 0 || nr >= rows) continue;
+      const k = key(nc, nr);
+      if (!blob.has(k)) frontier.set(k, { col: nc, row: nr });
+    }
+  };
+  addFrontierNeighbors(seed);
 
-    const alreadyReachable = zone.some((c) => emojiRepository.isMatch(c.symbol, keyword));
-    if (alreadyReachable) continue;
-
-    zone.sort((a, b) => manhattan(a, corner) - manhattan(b, corner));
-    const target = zone[0];
-    target.symbol = matchingSymbols[Math.floor(Math.random() * matchingSymbols.length)];
+  while (blob.size < size && frontier.size > 0) {
+    const candidates = [...frontier.values()];
+    const pick = candidates[Math.floor(Math.random() * candidates.length)];
+    const k = key(pick.col, pick.row);
+    frontier.delete(k);
+    blob.set(k, pick);
+    addFrontierNeighbors(pick);
   }
+
+  return blob;
 }
 
-const NEIGHBOR_DELTAS = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+/**
+ * Builds a monotonic (Manhattan-shortest) path of cells from `from` to `to`,
+ * not including `from`, moving one axis at a time.
+ */
+function pathBetween(from, to) {
+  const path = [];
+  let col = from.col;
+  let row = from.row;
+  while (col !== to.col || row !== to.row) {
+    if (col !== to.col) col += Math.sign(to.col - col);
+    else row += Math.sign(to.row - row);
+    path.push({ col, row });
+  }
+  return path;
+}
+
+/**
+ * A round is only fair if a player can actually reach the safe region and
+ * clear it without their lives running out first. For each spawn corner,
+ * this finds the shortest path to the nearest cell of the safe blob; if that
+ * distance would force more poison hits than the lives budget allows, it
+ * extends the blob along that path (starting from the blob's end) until the
+ * remaining unclaimed stretch is short enough to survive -- i.e. it "carves
+ * a path" from spawn to the safe region rather than leaving it to chance.
+ */
+function ensureEveryCornerCanReachBlob(blob, { cols, rows, maxDistance }) {
+  for (const corner of spawnCorners(cols, rows)) {
+    let nearest = null;
+    let nearestDist = Infinity;
+    for (const cell of blob.values()) {
+      const d = manhattan(cell, corner);
+      if (d < nearestDist) {
+        nearestDist = d;
+        nearest = cell;
+      }
+    }
+    if (!nearest || nearestDist <= maxDistance) continue;
+
+    const path = pathBetween(corner, nearest); // length === nearestDist
+    const cellsToClaim = nearestDist - maxDistance;
+    // Claim the cells closest to the existing blob first, extending it
+    // backward toward the corner just far enough to fit the lives budget.
+    for (let i = path.length - 1; i >= path.length - cellsToClaim; i--) {
+      const cell = path[i];
+      blob.set(key(cell.col, cell.row), cell);
+    }
+  }
+}
 
 /**
  * Difficulty stats for the "Difficulty" CSV category. `numberOfSafePaths` has
  * no single agreed-upon definition for a free-roam (not turn-by-turn maze)
  * board, so it's approximated here as the count of 4-connected clusters of
  * correct cells -- i.e. how many separate "safe regions" a player has to
- * find, rather than true path enumeration. avgSafeChoicesPerMove and
- * narrowPathIndicator are exact given that approximation.
+ * find, rather than true path enumeration. By construction this is normally
+ * 1 (a single connected safe region plus whatever corner-reachability arms
+ * were carved onto it). avgSafeChoicesPerMove and narrowPathIndicator are
+ * exact given that approximation.
  */
 function computeDifficultyStats(grid, keyword, emojiRepository, cols, rows) {
-  const byKey = new Map(grid.map((c) => [`${c.col},${c.row}`, c]));
+  const byKey = new Map(grid.map((c) => [key(c.col, c.row), c]));
   const isCorrect = (c) => emojiRepository.isMatch(c.symbol, keyword);
   const correctCells = grid.filter(isCorrect);
 
   const neighborCorrectCounts = correctCells.map((c) => {
     let n = 0;
     for (const [dc, dr] of NEIGHBOR_DELTAS) {
-      const nb = byKey.get(`${c.col + dc},${c.row + dr}`);
+      const nb = byKey.get(key(c.col + dc, c.row + dr));
       if (nb && isCorrect(nb)) n += 1;
     }
     return n;
@@ -88,7 +154,7 @@ function computeDifficultyStats(grid, keyword, emojiRepository, cols, rows) {
   const visited = new Set();
   let safeClusterCount = 0;
   for (const start of correctCells) {
-    const startKey = `${start.col},${start.row}`;
+    const startKey = key(start.col, start.row);
     if (visited.has(startKey)) continue;
     safeClusterCount += 1;
     const stack = [start];
@@ -96,7 +162,7 @@ function computeDifficultyStats(grid, keyword, emojiRepository, cols, rows) {
     while (stack.length > 0) {
       const cur = stack.pop();
       for (const [dc, dr] of NEIGHBOR_DELTAS) {
-        const nbKey = `${cur.col + dc},${cur.row + dr}`;
+        const nbKey = key(cur.col + dc, cur.row + dr);
         const nb = byKey.get(nbKey);
         if (nb && isCorrect(nb) && !visited.has(nbKey)) {
           visited.add(nbKey);
@@ -117,46 +183,45 @@ function computeDifficultyStats(grid, keyword, emojiRepository, cols, rows) {
 }
 
 /**
- * Builds one round: a keyword plus a COLS x ROWS grid of emoji symbols,
- * with a controlled number of cells that correctly match the keyword
- * (per emojiRepository, the backend database) so rounds are never
- * unwinnable (0 matches) or trivial (nearly every cell matches), and never
- * unfairly stack every wrong cell right around a player's spawn point.
+ * Builds one round: a keyword plus a COLS x ROWS grid of emoji symbols, with
+ * a controlled number of cells that correctly match the keyword (per
+ * emojiRepository, the backend database). Correct cells are grown as one
+ * connected region rather than scattered independently, and every spawn
+ * corner is guaranteed a lives-budget-bounded path to that region -- so a
+ * round can never be lost purely to unlucky placement; clearing the whole
+ * board is always possible with optimal play.
  */
-function generateRound(emojiRepository, { cols, rows, minMatches, maxMatches, spawnSafeRadius = 2 }) {
+function generateRound(emojiRepository, { cols, rows, minMatches, maxMatches, spawnSafeRadius = 2, startingLives = 3 }) {
   const keyword = emojiRepository.pickKeyword(minMatches);
   const matchingSymbols = emojiRepository.getMatchingSymbols(keyword);
   const allSymbols = emojiRepository.getAllSymbols();
   const wrongSymbols = allSymbols.filter((s) => !matchingSymbols.includes(s));
 
   const totalCells = cols * rows;
-  const targetCorrect = Math.min(
-    totalCells,
-    Math.max(1, randomBetween(minMatches, Math.min(maxMatches, matchingSymbols.length > 0 ? totalCells : minMatches)))
-  );
+  const targetCorrect =
+    matchingSymbols.length === 0
+      ? 0
+      : Math.min(totalCells, Math.max(1, randomBetween(minMatches, Math.min(maxMatches, totalCells))));
 
-  const cellSymbols = [];
-  for (let i = 0; i < targetCorrect; i++) {
-    cellSymbols.push(matchingSymbols[Math.floor(Math.random() * matchingSymbols.length)]);
-  }
-  for (let i = targetCorrect; i < totalCells; i++) {
-    const pool = wrongSymbols.length > 0 ? wrongSymbols : allSymbols;
-    cellSymbols.push(pool[Math.floor(Math.random() * pool.length)]);
+  const blob = targetCorrect > 0 ? growConnectedBlob(cols, rows, targetCorrect) : new Map();
+
+  // Never require more poison hits to reach the safe region than the player
+  // can actually survive.
+  const maxDistance = Math.max(1, Math.min(spawnSafeRadius, startingLives - 1));
+  if (blob.size > 0) {
+    ensureEveryCornerCanReachBlob(blob, { cols, rows, maxDistance });
   }
 
-  const shuffled = shuffle(cellSymbols);
   const grid = [];
-  let idx = 0;
   for (let row = 0; row < rows; row++) {
     for (let col = 0; col < cols; col++) {
-      grid.push({ col, row, symbol: shuffled[idx++] });
+      const isSafe = blob.has(key(col, row));
+      const pool = isSafe ? matchingSymbols : wrongSymbols.length > 0 ? wrongSymbols : allSymbols;
+      grid.push({ col, row, symbol: pool[Math.floor(Math.random() * pool.length)] });
     }
   }
 
-  ensureReachableFromEverySpawn(grid, { cols, rows, keyword, matchingSymbols, emojiRepository, radius: spawnSafeRadius });
-
-  // Recount from the final grid -- the safe-spawn repair above can add
-  // correct cells beyond targetCorrect, so this is the only accurate figure.
+  // Recount from the final grid to stay honest about what's actually there.
   const correctCount = grid.filter((c) => emojiRepository.isMatch(c.symbol, keyword)).length;
   const difficulty = computeDifficultyStats(grid, keyword, emojiRepository, cols, rows);
 

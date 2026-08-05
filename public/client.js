@@ -29,10 +29,12 @@
     return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   }
 
+  // Heart glyph, standardized to match the other QMoji games' lives icon.
   function shieldRow(lives, total, small) {
     let html = "";
     for (let i = 0; i < total; i++) {
-      html += `<span class="${small ? "sb-shields" : "shield-icon"}${i >= lives ? " broken" : ""}">🛡️</span>`;
+      const broken = i >= lives;
+      html += `<span class="${small ? "sb-shields" : "shield-icon"}${broken ? " broken" : ""}">${broken ? "💔" : "❤️"}</span>`;
     }
     return html;
   }
@@ -119,6 +121,40 @@
   let muncherEls = new Map(); // socketId -> el
   let myPrev = null; // { score, lives, eaten: Set }
   const animatingKeys = new Set();
+  let lastPlayers = [];
+
+  // Keeps the board from ever overflowing a narrow (mobile) viewport --
+  // shrinks the cell size to fit rather than letting the grid's fixed pixel
+  // width run off the edge of the screen.
+  function computeCellSize(colsArg) {
+    const available = Math.min(window.innerWidth - 24, 480);
+    const raw = Math.floor(available / colsArg);
+    return Math.max(30, Math.min(58, raw));
+  }
+
+  function applyCellSize(size) {
+    cellSize = size;
+    document.documentElement.style.setProperty("--cell", cellSize + "px");
+    boardEl.style.width = (cellSize * cols) + "px";
+    boardEl.style.height = (cellSize * rows) + "px";
+  }
+
+  let resizeTimer = null;
+  window.addEventListener("resize", () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => {
+      if (screens.game.classList.contains("hidden") || cellEls.size === 0) return;
+      const newSize = computeCellSize(cols);
+      if (newSize === cellSize) return;
+      applyCellSize(newSize);
+      for (const [key, el] of cellEls) {
+        const [col, row] = key.split(",").map(Number);
+        el.style.left = (col * cellSize) + "px";
+        el.style.top = (row * cellSize) + "px";
+      }
+      renderMunchers(lastPlayers);
+    }, 150);
+  });
 
   // ---- go home (available in-game and post-game; deliberately absent from
   // the waiting-room screen so players can't slip out of an active lobby) ----
@@ -138,8 +174,7 @@
   function renderGrid(payload) {
     cols = payload.cols; rows = payload.rows;
     startingLives = payload.startingLives || startingLives;
-    boardEl.style.width = (cellSize * cols) + "px";
-    boardEl.style.height = (cellSize * rows) + "px";
+    applyCellSize(computeCellSize(cols));
     boardEl.innerHTML = "";
     cellEls.clear();
     muncherEls.clear();
@@ -286,6 +321,7 @@
     roundTotalEl.textContent = payload.totalRounds;
     keywordEl.textContent = payload.keyword;
     renderGrid(payload);
+    lastPlayers = payload.players;
     renderMunchers(payload.players);
     syncMyBoard(payload.players);
     renderScoreboard(payload.players);
@@ -294,6 +330,7 @@
   });
 
   socket.on("state_update", (payload) => {
+    lastPlayers = payload.players;
     renderMunchers(payload.players);
     syncMyBoard(payload.players);
     renderScoreboard(payload.players);

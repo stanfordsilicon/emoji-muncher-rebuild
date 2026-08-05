@@ -78,8 +78,8 @@ input:focus { outline: 2px solid var(--accent); }
 .player-list .swatch { display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:8px; }
 
 /* ---- game screen ---- */
-#screen-game { align-items: flex-start; gap: 24px; flex-wrap: wrap; }
-#game { width: calc(var(--cell) * 7 + 20px); }
+#screen-game { align-items: flex-start; gap: 24px; flex-wrap: wrap; padding: 12px; }
+#game { width: 100%; max-width: calc(var(--cell) * 7 + 20px); box-sizing: border-box; }
 
 #topBar { display: flex; align-items: center; justify-content: space-between; padding: 2px 2px 8px; }
 #roundInfo { font-size: 12px; font-weight: 700; color: #9aa3d1; letter-spacing: 0.4px; }
@@ -101,10 +101,6 @@ input:focus { outline: 2px solid var(--accent); }
   padding: 16px 14px;
   text-align: center;
   margin-bottom: 10px;
-}
-#keywordEyebrow {
-  display: block; font-size: 11px; font-weight: 800; letter-spacing: 2.5px;
-  color: #8891c9; margin-bottom: 4px;
 }
 #keywordBanner b {
   font-size: 36px; font-weight: 800; color: #ffd54f; letter-spacing: 0.5px;
@@ -159,8 +155,7 @@ input:focus { outline: 2px solid var(--accent); }
 .stat-icon { font-size: 17px; }
 #myLives.stat-chip { color: #fff; }
 .shields { display: inline-flex; gap: 3px; }
-.shield-icon { font-size: 16px; filter: none; opacity: 1; transition: opacity 0.2s ease, filter 0.2s ease; }
-.shield-icon.broken { opacity: 0.28; filter: grayscale(1); }
+.shield-icon { font-size: 16px; }
 .shield-icon.just-broke { animation: shieldHit 0.4s ease; }
 @keyframes shieldHit {
   0% { transform: scale(1); }

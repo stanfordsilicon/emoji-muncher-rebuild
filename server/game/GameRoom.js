@@ -251,6 +251,7 @@ class GameRoom {
       minMatches: this.config.MIN_MATCHES_PER_KEYWORD,
       maxMatches: this.config.MAX_MATCHES_PER_KEYWORD,
       spawnSafeRadius: this.config.SPAWN_SAFE_RADIUS,
+      startingLives: this.config.STARTING_LIVES,
     });
     this.keyword = keyword;
     this.grid = grid;
