@@ -189,6 +189,10 @@
       boardEl.appendChild(el);
       cellEls.set(`${cell.col},${cell.row}`, el);
     }
+    if (payload.destination) {
+      const destEl = cellEls.get(`${payload.destination.col},${payload.destination.row}`);
+      if (destEl) destEl.classList.add("destination");
+    }
   }
 
   function startTimer(timeLimitMs) {

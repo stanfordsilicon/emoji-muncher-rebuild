@@ -119,6 +119,18 @@ input:focus { outline: 2px solid var(--accent); }
   display: flex; align-items: center; justify-content: center; font-size: 21px;
 }
 .cell.eaten-mine { opacity: 0; transform: scale(0); transition: transform 0.22s ease, opacity 0.22s ease; }
+.cell.destination {
+  border-color: #ffd54f; border-width: 3px;
+  box-shadow: 0 0 0 2px rgba(255,213,79,0.5), 0 0 10px 2px rgba(255,213,79,0.6);
+  animation: destinationPulse 1.6s ease-in-out infinite;
+}
+.cell.destination::after {
+  content: "🚩"; position: absolute; top: -8px; right: -6px; font-size: 14px;
+}
+@keyframes destinationPulse {
+  0%, 100% { box-shadow: 0 0 0 2px rgba(255,213,79,0.5), 0 0 10px 2px rgba(255,213,79,0.6); }
+  50% { box-shadow: 0 0 0 4px rgba(255,213,79,0.75), 0 0 16px 4px rgba(255,213,79,0.85); }
+}
 .cell.correct-flash { animation: correctPop 0.32s ease; }
 .cell.wrong-flash { animation: wrongShake 0.36s ease; border-color: #e57373; }
 @keyframes correctPop {

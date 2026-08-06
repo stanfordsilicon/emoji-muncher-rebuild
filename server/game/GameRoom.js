@@ -54,6 +54,7 @@ class GameRoom {
     this.keyword = null;
     this.grid = [];
     this.correctCount = 0;
+    this.destination = null;
     this.roundTimer = null;
 
     this.gameStartedAt = null;
@@ -76,6 +77,7 @@ class GameRoom {
       eaten: new Set(),
       correctRemaining: 0,
       roundDone: false,
+      destinationReached: false,
       eliminated: false,
       connected: true,
       lastMoveAt: 0,
@@ -132,6 +134,7 @@ class GameRoom {
     this.round = 0;
     this.keyword = null;
     this.grid = [];
+    this.destination = null;
     this.gameStartedAt = null;
     this.roundStartedAt = null;
     this._roundFinalizedFor = -1;
@@ -140,6 +143,7 @@ class GameRoom {
       player.lives = this.config.STARTING_LIVES;
       player.eliminated = false;
       player.roundDone = false;
+      player.destinationReached = false;
       player.eaten = new Set();
       player.eatOrder = 0;
       player.lastActionAt = 0;
@@ -192,7 +196,10 @@ class GameRoom {
     if (correct) {
       player.score += this.config.POINTS_PER_CORRECT;
       player.correctRemaining -= 1;
-      if (player.correctRemaining <= 0) player.roundDone = true;
+      if (this.destination && cell.col === this.destination.col && cell.row === this.destination.row) {
+        player.destinationReached = true;
+        player.roundDone = true;
+      }
       if (player.firstCorrectAt === null) player.firstCorrectAt = now;
     } else {
       player.lives -= 1;
@@ -245,7 +252,7 @@ class GameRoom {
       return;
     }
 
-    const { keyword, grid, correctCount, difficulty } = generateRound(this.emojiRepository, {
+    const { keyword, grid, correctCount, difficulty, destination } = generateRound(this.emojiRepository, {
       cols: this.config.GRID_COLS,
       rows: this.config.GRID_ROWS,
       minMatches: this.config.MIN_MATCHES_PER_KEYWORD,
@@ -256,6 +263,7 @@ class GameRoom {
     this.keyword = keyword;
     this.grid = grid;
     this.correctCount = correctCount;
+    this.destination = destination ? { col: destination.col, row: destination.row } : null;
     this.roundStartedAt = new Date();
 
     const emojiMeta = this._emojiMetaForGrid(grid, keyword);
@@ -269,6 +277,7 @@ class GameRoom {
       player.eaten = new Set();
       player.correctRemaining = correctCount;
       player.roundDone = false;
+      player.destinationReached = false;
       player.eatOrder = 0;
       player.lastActionAt = this.roundStartedAt.getTime();
       player.firstInputAt = null;
@@ -280,11 +289,13 @@ class GameRoom {
         board: grid.map((c) => ({ col: c.col, row: c.row, symbol: c.symbol })),
         totalCells: this.config.GRID_COLS * this.config.GRID_ROWS,
         correctCount,
+        destination: this.destination,
         safeRatio: difficulty.safeRatio,
         poisonRatio: difficulty.poisonRatio,
         avgSafeChoicesPerMove: difficulty.avgSafeChoicesPerMove,
         narrowPathIndicator: difficulty.narrowPathIndicator,
         safeClusterCount: difficulty.safeClusterCount,
+        pathRepairs: difficulty.pathRepairs,
         datasetVersion: "qmoji-csv-v1", // no inference/poison-selection model yet; static curated dataset
         emojiMeta,
         startedAt: this.roundStartedAt,
@@ -296,6 +307,7 @@ class GameRoom {
         timeToFirstInput: null,
         timeToCorrectAnswer: null,
         eliminated: false,
+        destinationReached: false,
         failureSequence: null,
         poisonEmojiTriggered: null,
         poisonTimestamp: null,
@@ -351,6 +363,7 @@ class GameRoom {
       entry.timeToFirstInput = player.firstInputAt !== null ? player.firstInputAt - roundStart : null;
       entry.timeToCorrectAnswer = player.firstCorrectAt !== null ? player.firstCorrectAt - roundStart : null;
       entry.eliminated = player.eliminated;
+      entry.destinationReached = player.destinationReached;
       entry.failureSequence = player.eliminated ? player.eatOrder : null;
       entry.nearbyInferredNotEaten = nearbyInferredNotEaten;
 
@@ -467,6 +480,7 @@ class GameRoom {
       totalRounds: this.config.ROUND_COUNT,
       keyword: this.keyword,
       grid: this.grid.map((c) => ({ col: c.col, row: c.row, symbol: c.symbol })),
+      destination: this.destination,
       cols: this.config.GRID_COLS,
       rows: this.config.GRID_ROWS,
       timeLimitMs: this.config.ROUND_TIME_MS,
