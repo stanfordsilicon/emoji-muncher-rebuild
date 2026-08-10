@@ -42,6 +42,20 @@ class LobbyManager {
     return code;
   }
 
+  // Adopts an externally-sourced code (the arcade party's room code)
+  // instead of generating a random one. Idempotent: if this game already
+  // has a room under that code — e.g. two arcade players both landed here
+  // first and both tried to create it — the existing room is reused rather
+  // than erroring, so there's still only ever one room per code.
+  createRoomWithCode(code) {
+    const normalized = String(code || "").toUpperCase();
+    if (!normalized) return this.createRoom();
+    if (!this.rooms.has(normalized)) {
+      this.rooms.set(normalized, this._makeRoom(normalized));
+    }
+    return normalized;
+  }
+
   getRoom(code) {
     return this.rooms.get((code || "").toUpperCase());
   }

@@ -73,6 +73,62 @@
     socket.emit("join_room", { username, code });
   });
 
+  // ---- QMoji Arcade: party continuity from the homescreen ----
+  // Enhancement only — if there's no ?room= or the lookup fails, none of
+  // this runs and the lobby above behaves exactly as it does standalone.
+  const backToLaunchpadBtn = document.getElementById("backToLaunchpadBtn");
+  let arcadeRoomCode = null;
+  let arcadeLang = null;
+  let arcadePlayerId = null;
+
+  backToLaunchpadBtn.addEventListener("click", () => {
+    window.location.href = QMojiArcade.backToHomescreenUrl(arcadeRoomCode, arcadeLang, arcadePlayerId);
+  });
+
+  (async function initArcadeLink() {
+    const arcade = await QMojiArcade.initArcade();
+    if (!arcade) return;
+    arcadeRoomCode = arcade.roomCode;
+    arcadeLang = arcade.lang;
+    arcadePlayerId = arcade.playerId;
+
+    // The room code is fixed by the party the player already formed on the
+    // homescreen — one code, sourced from the URL, not a second manual entry.
+    roomCodeInput.value = arcadeRoomCode;
+    roomCodeInput.disabled = true;
+    document.querySelector(".divider").textContent = "Joining party " + arcadeRoomCode + "…";
+    document.getElementById("createRoomBtn").classList.add("hidden");
+
+    const me = (arcade.room.players || []).find((p) => p.playerId === arcadePlayerId);
+
+    if (me) {
+      // Known party member — skip the manual entry screen entirely.
+      usernameInput.value = me.name;
+      let createFallbackSent = false;
+      const cleanup = () => { socket.off("error_message", onError); socket.off("lobby_state", cleanup); };
+      const onError = ({ message }) => {
+        if (createFallbackSent || message !== "Room not found") return;
+        createFallbackSent = true;
+        // First arcade player to reach this game — seed a room under the
+        // party's own code instead of letting the server generate one.
+        socket.emit("create_room", { username: me.name, code: arcadeRoomCode });
+      };
+      socket.on("error_message", onError);
+      socket.once("lobby_state", cleanup);
+      socket.emit("join_room", { username: me.name, code: arcadeRoomCode });
+    } else {
+      // A raw game link was opened directly (not routed through the
+      // homescreen) — let them type a name as usual, but also enroll them
+      // in the arcade party so it carries forward from here too.
+      const joinBtn = document.getElementById("joinRoomBtn");
+      joinBtn.textContent = "Join Party";
+      joinBtn.addEventListener("click", () => {
+        const name = usernameInput.value.trim();
+        if (name) QMojiArcade.joinRoom(arcadeRoomCode, name).catch(() => {});
+      });
+    }
+  })();
+
   // ---- waiting room ----
   const waitingCode = document.getElementById("waitingCode");
   const waitingPlayers = document.getElementById("waitingPlayers");

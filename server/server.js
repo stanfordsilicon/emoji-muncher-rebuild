@@ -8,13 +8,15 @@ const { Server } = require("socket.io");
 const config = require("./config");
 const { emojiRepository, scoreRepository, analyticsRepository, DATA_BACKEND } = require("./data");
 const { LobbyManager } = require("./game/LobbyManager");
+const { arcadeProxy } = require("./arcade-proxy");
 
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
-app.use(express.static(path.join(__dirname, "..", "public")));
 app.use(express.json());
+app.all("/arcade-api/v1/*", arcadeProxy); // local dev only — see arcade-proxy.js
+app.use(express.static(path.join(__dirname, "..", "public")));
 
 app.get("/api/leaderboard", async (req, res) => {
   res.json({ leaderboard: await scoreRepository.getLeaderboard(20) });
@@ -40,10 +42,13 @@ function broadcastRoomChange(room) {
 }
 
 io.on("connection", (socket) => {
-  socket.on("create_room", ({ username } = {}) => {
+  socket.on("create_room", ({ username, code: requestedCode } = {}) => {
     const name = String(username || "").trim().slice(0, 20);
     if (!name) return sendError(socket, "Enter a username first.");
-    const code = lobbyManager.createRoom();
+    // requestedCode arrives when QMoji 2.0 launched this game with a party
+    // already formed — the arcade room's code becomes this game's room code
+    // too (a substitution, not a second, parallel room-code system).
+    const code = requestedCode ? lobbyManager.createRoomWithCode(requestedCode) : lobbyManager.createRoom();
     try {
       const room = lobbyManager.joinRoom(socket, code, name);
       io.to(room.code).emit("lobby_state", room.toLobbyPayload());
