@@ -240,8 +240,15 @@ class GameRoom {
 
   _advanceAfterDelay() {
     this._finalizeCurrentRoundLogs();
-    this.emitToRoom("round_end", { round: this.round, players: this._publicPlayers() });
-    setTimeout(() => this._nextRound(), 1200);
+    // nextRoundInMs lets the client freeze its timer bar and render an
+    // actual "next round in..." countdown instead of just guessing when
+    // _nextRound() will fire.
+    this.emitToRoom("round_end", {
+      round: this.round,
+      players: this._publicPlayers(),
+      nextRoundInMs: this.config.NEXT_ROUND_PAUSE_MS,
+    });
+    setTimeout(() => this._nextRound(), this.config.NEXT_ROUND_PAUSE_MS);
   }
 
   _nextRound() {
@@ -256,9 +263,7 @@ class GameRoom {
       cols: this.config.GRID_COLS,
       rows: this.config.GRID_ROWS,
       minMatches: this.config.MIN_MATCHES_PER_KEYWORD,
-      maxMatches: this.config.MAX_MATCHES_PER_KEYWORD,
-      spawnSafeRadius: this.config.SPAWN_SAFE_RADIUS,
-      startingLives: this.config.STARTING_LIVES,
+      pathsPerCorner: this.config.PATHS_PER_CORNER,
     });
     this.keyword = keyword;
     this.grid = grid;

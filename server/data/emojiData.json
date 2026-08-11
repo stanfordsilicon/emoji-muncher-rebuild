@@ -1,5 +1,5 @@
 {
-  "_comment": "Generated from 'QMoji 2.0 Gameplay Prototyping Project' CSV. Each entry is one playable emoji and the keywords a player-given prompt may ask for. Keywords are lowercase for case-insensitive matching.",
+  "_comment": "Generated from 'QMoji 2.0 Gameplay Prototyping Project' CSV, plus a later addition of animal/food/nature/object emoji (see the entries after 😙) to fix every original entry being a visually-similar yellow face/hand/heart. Each entry is one playable emoji and the keywords a player-given prompt may ask for. Keywords are lowercase for case-insensitive matching.",
   "emoji": [
     { "symbol": "🤣", "keywords": ["crying", "face", "floor", "funny", "haha", "happy", "hehe", "hilarious", "joy", "laugh", "lmao", "lol", "rofl", "roflmao", "rolling", "tear"] },
     { "symbol": "😘", "keywords": ["adorbs", "bae", "blowing", "face", "flirt", "heart", "ily", "kiss", "love", "lover", "miss", "muah", "romantic", "smooch", "xoxo", "you"] },
@@ -20,6 +20,40 @@
     { "symbol": "🌈", "keywords": ["gay", "genderqueer", "glbt", "glbtq", "lesbian", "lgbt", "lgbtq", "lgbtqia", "nature", "pride", "queer", "rain", "rainbow", "trans", "transgender", "weather"] },
     { "symbol": "👊", "keywords": ["absolutely", "agree", "boom", "bro", "bruh", "bump", "clenched", "correct", "fist", "hand", "knuckle", "oncoming", "pound", "punch", "rock", "ttyl"] },
     { "symbol": "🥹", "keywords": ["admiration", "aww", "back", "cry", "embarrassed", "face", "feelings", "grateful", "gratitude", "holding", "joy", "please", "proud", "resist", "sad", "tears"] },
-    { "symbol": "😙", "keywords": ["143", "closed", "date", "dating", "eye", "eyes", "face", "flirt", "ily", "kiss", "kisses", "kissing", "love", "night", "smile", "smiling"] }
+    { "symbol": "😙", "keywords": ["143", "closed", "date", "dating", "eye", "eyes", "face", "flirt", "ily", "kiss", "kisses", "kissing", "love", "night", "smile", "smiling"] },
+
+    { "symbol": "🐶", "keywords": ["animal", "bark", "best friend", "canine", "companion", "cute", "doggo", "dog", "fur", "furry", "good boy", "loyal", "paw", "pet", "puppy", "woof"] },
+    { "symbol": "🐱", "keywords": ["animal", "cat", "companion", "cute", "feline", "fur", "furry", "independent", "kitten", "kitty", "meow", "paw", "pet", "purr", "sassy", "whiskers"] },
+    { "symbol": "🐰", "keywords": ["animal", "bunny", "carrot", "cute", "ears", "easter", "fluffy", "fur", "furry", "hop", "pet", "quick", "rabbit", "soft", "springy", "timid"] },
+    { "symbol": "🦁", "keywords": ["africa", "animal", "brave", "cat", "fierce", "jungle", "king", "lion", "majestic", "mane", "predator", "pride", "roar", "safari", "strong", "wild"] },
+    { "symbol": "🐼", "keywords": ["adorable", "animal", "bamboo", "bear", "black and white", "calm", "chubby", "china", "cute", "endangered", "fluffy", "gentle", "panda", "roly poly", "sleepy", "zoo"] },
+    { "symbol": "🦊", "keywords": ["animal", "clever", "cunning", "forest", "fox", "night", "orange", "quick", "red", "sly", "smart", "sneaky", "tail", "trickster", "wild", "woodland"] },
+    { "symbol": "🐸", "keywords": ["amphibian", "animal", "croak", "frog", "green", "hop", "jump", "lily pad", "pond", "ribbit", "slimy", "swamp", "tadpole", "tiny", "wart", "wet"] },
+    { "symbol": "🐢", "keywords": ["ancient", "animal", "calm", "hard", "hide", "ocean", "patient", "plod", "reptile", "retreat", "sea", "shell", "slow", "steady", "turtle", "wise"] },
+    { "symbol": "🐝", "keywords": ["animal", "bee", "busy", "buzz", "flower", "garden", "hive", "honey", "insect", "pollinate", "sting", "striped", "swarm", "wings", "worker", "yellow"] },
+    { "symbol": "🦋", "keywords": ["animal", "beauty", "butterfly", "colorful", "delicate", "flower", "flutter", "flying", "garden", "graceful", "insect", "light", "pretty", "spring", "transform", "wings"] },
+    { "symbol": "🐳", "keywords": ["animal", "big", "blue", "deep", "gentle", "giant", "huge", "majestic", "mammal", "migrate", "ocean", "sea", "splash", "swim", "water", "whale"] },
+    { "symbol": "🐙", "keywords": ["alien", "animal", "arms", "camouflage", "clever", "deep", "ink", "octopus", "ocean", "purple", "sea", "smart", "squishy", "tentacle", "water", "weird"] },
+    { "symbol": "🍕", "keywords": ["cheese", "cravings", "crust", "delicious", "dinner", "food", "hot", "hungry", "italian", "meal", "party", "pizza", "slice", "takeout", "tasty", "yummy"] },
+    { "symbol": "🍔", "keywords": ["bun", "burger", "cheese", "delicious", "dinner", "fast food", "food", "greasy", "grill", "hamburger", "hungry", "lunch", "meal", "meat", "tasty", "yummy"] },
+    { "symbol": "🍩", "keywords": ["bakery", "breakfast", "coffee", "delicious", "dessert", "donut", "food", "glazed", "round", "snack", "sprinkles", "sugar", "sweet", "tasty", "treat", "yummy"] },
+    { "symbol": "🍦", "keywords": ["cold", "cone", "cream", "delicious", "dessert", "food", "ice cream", "melt", "refreshing", "scoop", "snack", "summer", "sweet", "tasty", "treat", "yummy"] },
+    { "symbol": "🍉", "keywords": ["cold", "food", "fruit", "green", "healthy", "hydrating", "juicy", "picnic", "red", "refreshing", "seeds", "slice", "summer", "sweet", "tasty", "watermelon"] },
+    { "symbol": "🍎", "keywords": ["apple", "autumn", "core", "crisp", "doctor", "food", "fruit", "healthy", "juicy", "orchard", "red", "snack", "sweet", "tasty", "teacher", "wholesome"] },
+    { "symbol": "🥑", "keywords": ["avocado", "brunch", "creamy", "fat", "food", "fruit", "green", "guacamole", "healthy", "mexican", "snack", "soft", "superfood", "tasty", "toast", "trendy"] },
+    { "symbol": "☕", "keywords": ["aroma", "bitter", "brew", "cafe", "caffeine", "coffee", "daily", "drink", "energy", "espresso", "hot", "morning", "mug", "tired", "wake up", "warm"] },
+    { "symbol": "🌮", "keywords": ["cheese", "crunchy", "delicious", "dinner", "filling", "food", "lunch", "meal", "mexican", "salsa", "shell", "spicy", "taco", "tasty", "wrap", "yummy"] },
+    { "symbol": "🌵", "keywords": ["arid", "cactus", "desert", "dry", "garden", "green", "nature", "plant", "prickly", "resilient", "southwest", "spiky", "sturdy", "succulent", "thorns", "tough"] },
+    { "symbol": "🌻", "keywords": ["bloom", "bright", "cheerful", "field", "flower", "garden", "growth", "happy", "nature", "petals", "summer", "sunflower", "sunny", "tall", "warm", "yellow"] },
+    { "symbol": "🌊", "keywords": ["beach", "blue", "crash", "current", "deep", "motion", "nature", "ocean", "powerful", "sea", "splash", "surf", "swim", "tide", "water", "wave"] },
+    { "symbol": "⛰️", "keywords": ["adventure", "climb", "hike", "high", "majestic", "mountain", "nature", "outdoors", "peak", "rocky", "rugged", "snow", "summit", "tall", "terrain", "view"] },
+    { "symbol": "🔥", "keywords": ["blaze", "burn", "camp", "danger", "energy", "fire", "flame", "heat", "hot", "intense", "light", "nature", "orange", "red", "spark", "warm"] },
+    { "symbol": "⚡", "keywords": ["bright", "charge", "dangerous", "electric", "energy", "fast", "flash", "lightning", "nature", "power", "quick", "shock", "sky", "storm", "thunder", "weather"] },
+    { "symbol": "❄️", "keywords": ["chilly", "cold", "crystal", "delicate", "flake", "freeze", "frost", "frozen", "holiday", "ice", "nature", "snow", "weather", "white", "winter", "wonder"] },
+    { "symbol": "🎸", "keywords": ["band", "chords", "concert", "guitar", "instrument", "jam", "melody", "music", "object", "play", "rock", "sound", "string", "strum", "tune", "wooden"] },
+    { "symbol": "⚽", "keywords": ["active", "athletic", "ball", "compete", "energy", "field", "football", "game", "goal", "kick", "object", "play", "round", "soccer", "team", "world cup"] },
+    { "symbol": "🏀", "keywords": ["active", "athletic", "ball", "basketball", "bounce", "compete", "court", "dribble", "dunk", "game", "hoop", "object", "orange", "play", "score", "team"] },
+    { "symbol": "🚀", "keywords": ["adventure", "astronaut", "blast off", "explore", "fast", "fly", "future", "journey", "launch", "mission", "object", "powerful", "rocket", "sky", "space", "travel"] },
+    { "symbol": "🎨", "keywords": ["art", "artist", "brush", "canvas", "color", "colorful", "craft", "creative", "design", "expression", "hobby", "imagination", "object", "paint", "palette", "studio"] }
   ]
 }

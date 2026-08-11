@@ -11,12 +11,22 @@
 <button id="backToLaunchpadBtn" class="back-to-launchpad" type="button" title="Return to launch pad">
   ← RETURN TO LAUNCH PAD
 </button>
+<button id="muteBtn" class="sound-toggle icon-btn" type="button" title="Mute sound" aria-label="Mute sound">🔊</button>
 
 <!-- ============ LOBBY SCREEN ============ -->
 <section id="screen-lobby" class="screen">
   <div class="panel">
     <h1>😋 Emoji Munchers</h1>
     <p class="tag">Munch every emoji that matches the keyword. Multiplayer, same board, your own score.</p>
+
+    <div class="howto">
+      <b>How to play</b>
+      <ol>
+        <li>Type a username (or sign in below).</li>
+        <li>Use arrow keys (or the on-screen pad) to move.</li>
+        <li>Eat every emoji that matches the keyword and reach the 🚩 — avoid the rest, they cost a life!</li>
+      </ol>
+    </div>
 
     <label class="field">
       <span>Username</span>
@@ -25,6 +35,7 @@
 
     <div class="row">
       <button id="createRoomBtn" class="btn primary">Create Room</button>
+      <button id="playSoloBtn" class="btn">Play Solo</button>
     </div>
 
     <div class="divider">or join a room</div>
@@ -35,8 +46,37 @@
     </div>
 
     <p id="lobbyError" class="error"></p>
+
+    <div class="account-box">
+      <div id="accountSignedOut">
+        <button id="accountToggleBtn" class="link-btn" type="button">🔐 Sign in for personal stats</button>
+        <div id="authForm" class="auth-form hidden">
+          <input id="authUsername" placeholder="Username" autocomplete="username">
+          <input id="authPassword" type="password" placeholder="Password" autocomplete="current-password">
+          <div class="row">
+            <button id="signInBtn" class="btn">Sign In</button>
+            <button id="signUpBtn" class="btn">Sign Up</button>
+          </div>
+          <p id="authError" class="error"></p>
+        </div>
+      </div>
+      <div id="accountSignedIn" class="hidden">
+        <span id="accountWhoami"></span>
+        <button id="myStatsBtn" class="link-btn" type="button">📊 My Stats</button>
+        <button id="signOutBtn" class="link-btn" type="button">Sign out</button>
+      </div>
+    </div>
   </div>
 </section>
+
+<!-- ============ MY STATS MODAL ============ -->
+<div id="statsModalBackdrop" class="modal-backdrop hidden">
+  <div class="panel">
+    <h2>📊 My Stats</h2>
+    <ul id="statsList" class="player-list"></ul>
+    <button id="statsCloseBtn" class="btn primary">Close</button>
+  </div>
+</div>
 
 <!-- ============ WAITING ROOM ============ -->
 <section id="screen-waiting" class="screen hidden">
@@ -55,12 +95,15 @@
     <div id="topBar">
       <button id="homeBtnGame" class="icon-btn" title="Leave to home" aria-label="Leave to home">🏠</button>
       <div id="roundInfo">Round <span id="roundNum">1</span>/<span id="roundTotal">8</span></div>
-      <button id="muteBtn" class="icon-btn" title="Mute sound" aria-label="Mute sound">🔊</button>
     </div>
     <div id="keywordBanner">
       <b id="keywordName">...</b>
     </div>
+    <div id="roundOneBanner" class="round-one-banner hidden">
+      Arrow keys (or the pad below) to move. Eat every emoji that matches the keyword, avoid the rest, and race to the 🚩!
+    </div>
     <div id="timerBar"><div id="timerFill"></div></div>
+    <div id="nextRoundNote" class="next-round-note hidden"></div>
     <div id="boardWrap">
       <div id="board"></div>
     </div>
