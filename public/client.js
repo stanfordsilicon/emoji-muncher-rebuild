@@ -261,6 +261,7 @@
 
   // ---- game screen ----
   const boardEl = document.getElementById("board");
+  const gameEl = document.getElementById("game");
   const keywordEl = document.getElementById("keywordName");
   const roundNumEl = document.getElementById("roundNum");
   const roundTotalEl = document.getElementById("roundTotal");
@@ -280,13 +281,23 @@
   const animatingKeys = new Set();
   let lastPlayers = [];
 
-  // Keeps the board from ever overflowing a narrow (mobile) viewport --
-  // shrinks the cell size to fit rather than letting the grid's fixed pixel
-  // width run off the edge of the screen.
-  function computeCellSize(colsArg) {
-    const available = Math.min(window.innerWidth - 24, 480);
-    const raw = Math.floor(available / colsArg);
-    return Math.max(30, Math.min(58, raw));
+  // Keeps the board from ever overflowing the viewport -- shrinks the cell
+  // size to fit both axes rather than letting the grid's fixed pixel size
+  // run off the edge (width) or bottom (height) of the screen. Only width
+  // used to be considered here; on a short viewport that let a tall board
+  // (e.g. 7+ rows) run past the bottom with no way to see or reach the
+  // last row(s). chromeBudgetPx is a deliberately conservative estimate of
+  // everything else stacked above/below the board (top bar, keyword
+  // banner, timer, stats/hint/touchpad), not a live measurement.
+  function computeCellSize(colsArg, rowsArg) {
+    const availableWidth = Math.min(window.innerWidth - 24, 480);
+    const rawByWidth = Math.floor(availableWidth / colsArg);
+
+    const chromeBudgetPx = 360;
+    const availableHeight = Math.max(0, window.innerHeight - chromeBudgetPx);
+    const rawByHeight = Math.floor(availableHeight / rowsArg);
+
+    return Math.max(30, Math.min(58, rawByWidth, rawByHeight));
   }
 
   function applyCellSize(size) {
@@ -294,6 +305,12 @@
     document.documentElement.style.setProperty("--cell", cellSize + "px");
     boardEl.style.width = (cellSize * cols) + "px";
     boardEl.style.height = (cellSize * rows) + "px";
+    // #game's own max-width used to be a CSS constant sized for a
+    // different (smaller) column count, which silently clipped whatever
+    // didn't fit -- including, once the flag started always spawning in
+    // the rightmost column, the flag itself. Deriving it here instead
+    // keeps it correct for whatever the board's actual size is.
+    gameEl.style.maxWidth = (cellSize * cols + 20) + "px";
   }
 
   let resizeTimer = null;
@@ -301,7 +318,7 @@
     clearTimeout(resizeTimer);
     resizeTimer = setTimeout(() => {
       if (screens.game.classList.contains("hidden") || cellEls.size === 0) return;
-      const newSize = computeCellSize(cols);
+      const newSize = computeCellSize(cols, rows);
       if (newSize === cellSize) return;
       applyCellSize(newSize);
       for (const [key, el] of cellEls) {
@@ -331,7 +348,7 @@
   function renderGrid(payload) {
     cols = payload.cols; rows = payload.rows;
     startingLives = payload.startingLives || startingLives;
-    applyCellSize(computeCellSize(cols));
+    applyCellSize(computeCellSize(cols, rows));
     boardEl.innerHTML = "";
     cellEls.clear();
     muncherEls.clear();

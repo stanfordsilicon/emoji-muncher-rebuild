@@ -108,7 +108,12 @@ input:focus { outline: 2px solid var(--accent); }
 
 /* ---- game screen ---- */
 #screen-game { align-items: flex-start; gap: 24px; flex-wrap: wrap; padding: 64px 12px 12px; }
-#game { width: 100%; max-width: calc(var(--cell) * 7 + 20px); box-sizing: border-box; }
+/* max-width is set from JS (applyCellSize), sized off the board's actual
+   column count -- it used to be hardcoded for a 7-column board here, which
+   silently clipped the extra columns (including the flag's column) once
+   the grid grew past 7 wide. The 480px fallback only matters before the
+   first round's JS has run. */
+#game { width: 100%; max-width: 480px; box-sizing: border-box; }
 
 #topBar { display: flex; align-items: center; justify-content: space-between; padding: 2px 2px 8px; }
 #roundInfo { font-size: 12px; font-weight: 700; color: #9aa3d1; letter-spacing: 0.4px; }
@@ -139,7 +144,10 @@ input:focus { outline: 2px solid var(--accent); }
 #timerBar { height: 8px; background: #12142499; border-radius: 5px; overflow: hidden; margin-bottom: 10px; }
 #timerFill { height: 100%; width: 100%; background: var(--accent); transition: width 0.2s linear; }
 
-#boardWrap { position: relative; background: var(--grid-bg); border-radius: 12px; overflow: hidden; }
+/* overflow-x is a deliberate safety net, not the primary fix -- JS sizes
+   the board to fit, but if a future change ever gets that arithmetic wrong
+   again, a scrollbar beats silently clipping the flag's column off-screen. */
+#boardWrap { position: relative; background: var(--grid-bg); border-radius: 12px; overflow-x: auto; overflow-y: hidden; }
 #board { position: relative; margin: 0 auto; }
 .cell {
   position: absolute;
