@@ -56,6 +56,13 @@ class GameRoom {
     this.correctCount = 0;
     this.destination = null;
     this.roundTimer = null;
+    this.nextRoundTimer = null;
+    this._advancing = false; // true from the moment a round is confirmed over until _nextRound() actually runs -- guards against scheduling the "next round" timer more than once for the same round
+
+    // Cells are shared across the whole room, not per-player: once anyone
+    // eats one it's gone for everyone else too. Reset every round.
+    this.eatenCells = new Map(); // "col,row" -> { by: socketId, symbol, correct }
+    this.firstToFinishSocketId = null; // reset every round; whoever reaches the flag first gets the bonus
 
     this.gameStartedAt = null;
     this.roundStartedAt = null;
@@ -69,6 +76,7 @@ class GameRoom {
       throw new Error("Game already in progress");
     }
     this.players.set(socketId, {
+      socketId,
       username,
       score: 0,
       lives: this.config.STARTING_LIVES,
@@ -118,6 +126,8 @@ class GameRoom {
     this.round = 0;
     this.gameStartedAt = new Date();
     this._roundFinalizedFor = -1;
+    this._advancing = false;
+    this._clearNextRoundTimer();
     for (const player of this.players.values()) {
       player.score = 0;
       player.lives = this.config.STARTING_LIVES;
@@ -130,11 +140,15 @@ class GameRoom {
   restartGame(requestingSocketId) {
     if (requestingSocketId !== this.hostSocketId) throw new Error("Only the host can restart the game");
     this._clearTimer();
+    this._clearNextRoundTimer();
+    this._advancing = false;
     this.status = "lobby";
     this.round = 0;
     this.keyword = null;
     this.grid = [];
     this.destination = null;
+    this.eatenCells = new Map();
+    this.firstToFinishSocketId = null;
     this.gameStartedAt = null;
     this.roundStartedAt = null;
     this._roundFinalizedFor = -1;
@@ -157,7 +171,16 @@ class GameRoom {
   move(socketId, dir) {
     if (this.status !== "playing") return;
     const player = this.players.get(socketId);
-    if (!player || player.eliminated) return;
+    // roundDone is the important guard here: without it, a player who's
+    // already reached the flag could keep moving/munching (and scoring)
+    // during the next-round pause, and every one of those extra moves
+    // would re-trigger _maybeAdvanceRound() -- which used to schedule a
+    // *second* "advance to next round" timer on top of the first one,
+    // each additional move piling on another, all eventually firing back
+    // to back and blowing through several rounds in a fraction of a
+    // second. See _maybeAdvanceRound/_advancing for the belt-and-braces
+    // backstop against that same class of bug.
+    if (!player || player.eliminated || player.roundDone) return;
     const delta = DIRS[dir];
     if (!delta) return;
 
@@ -171,15 +194,24 @@ class GameRoom {
     player.muncherRow = clamp(player.muncherRow + delta[1], 0, this.config.GRID_ROWS - 1);
     this._resolveMunch(player);
 
-    this.emitToRoom("state_update", { players: this._publicPlayers() });
+    this.emitToRoom("state_update", {
+      players: this._publicPlayers(),
+      sharedEaten: this._publicSharedEaten(),
+      firstToFlag: this._firstToFlagUsername(),
+    });
     this._maybeAdvanceRound();
   }
 
   // ---- internals ----
 
+  // Cells are shared across the whole room: the first player to munch one
+  // resolves it (score/life, and it's removed from the board for
+  // everyone); anyone who steps onto it afterward finds nothing there --
+  // neither a reward nor a penalty. Reaching the flag's *location* always
+  // counts even if someone else already ate the emoji sitting on it, since
+  // the flag is a place to reach, not a thing to eat.
   _resolveMunch(player) {
     const key = `${player.muncherCol},${player.muncherRow}`;
-    if (player.eaten.has(key)) return; // already eaten by this player, nothing there anymore
     const cell = this.grid[player.muncherRow * this.config.GRID_COLS + player.muncherCol];
     if (!cell) return;
 
@@ -189,35 +221,50 @@ class GameRoom {
     if (isFirstInput) player.firstInputAt = now;
     player.lastActionAt = now;
 
-    player.eaten.add(key);
-    const correct = this.emojiRepository.isMatch(cell.symbol, this.keyword);
-    player.eatOrder += 1;
+    const isDestination = !!this.destination && cell.col === this.destination.col && cell.row === this.destination.row;
+    const alreadyShared = this.eatenCells.has(key);
 
-    if (correct) {
-      player.score += this.config.POINTS_PER_CORRECT;
-      player.correctRemaining -= 1;
-      if (this.destination && cell.col === this.destination.col && cell.row === this.destination.row) {
-        player.destinationReached = true;
-        player.roundDone = true;
+    if (!alreadyShared) {
+      const correct = this.emojiRepository.isMatch(cell.symbol, this.keyword);
+      this.eatenCells.set(key, { by: player.socketId, symbol: cell.symbol, correct });
+      player.eaten.add(key);
+      player.eatOrder += 1;
+
+      if (correct) {
+        player.score += this.config.POINTS_PER_CORRECT;
+        player.correctRemaining -= 1;
+        if (player.firstCorrectAt === null) player.firstCorrectAt = now;
+      } else {
+        player.lives -= 1;
+        if (player.lives <= 0) player.eliminated = true;
       }
-      if (player.firstCorrectAt === null) player.firstCorrectAt = now;
-    } else {
-      player.lives -= 1;
-      if (player.lives <= 0) player.eliminated = true;
+
+      if (player.currentRoundEntry) {
+        player.currentRoundEntry.eats.push({
+          emoji: cell.symbol,
+          col: cell.col,
+          row: cell.row,
+          correct,
+          eatOrder: player.eatOrder,
+          timestamp: new Date(now),
+          decisionTimeMs,
+          livesRemaining: player.lives,
+          scoreAfter: player.score,
+        });
+      }
+    } else if (!player.eaten.has(key)) {
+      // Someone else got here first -- record it as visited (for this
+      // player's own analytics/slime trail) without touching score/lives.
+      player.eaten.add(key);
     }
 
-    if (player.currentRoundEntry) {
-      player.currentRoundEntry.eats.push({
-        emoji: cell.symbol,
-        col: cell.col,
-        row: cell.row,
-        correct,
-        eatOrder: player.eatOrder,
-        timestamp: new Date(now),
-        decisionTimeMs,
-        livesRemaining: player.lives,
-        scoreAfter: player.score,
-      });
+    if (isDestination && !player.roundDone) {
+      player.destinationReached = true;
+      player.roundDone = true;
+      if (!this.firstToFinishSocketId) {
+        this.firstToFinishSocketId = player.socketId;
+        player.score += this.config.FIRST_TO_FLAG_BONUS;
+      }
     }
   }
 
@@ -227,12 +274,18 @@ class GameRoom {
 
   _maybeAdvanceRound() {
     const active = this._activePlayers();
-    const allEliminated = this._activePlayers().length === 0 && this.players.size > 0;
+    const allEliminated = active.length === 0 && this.players.size > 0;
     if (allEliminated) {
       this._endGame();
       return;
     }
+    // Belt-and-braces: move()'s roundDone guard should already make it
+    // impossible to reach this with a round-end already in flight, but
+    // removePlayer() also calls this, so the guard stays as a second line
+    // of defense against ever scheduling _nextRound() more than once.
+    if (this._advancing) return;
     if (active.length > 0 && active.every((p) => p.roundDone)) {
+      this._advancing = true;
       this._clearTimer();
       this._advanceAfterDelay();
     }
@@ -246,13 +299,36 @@ class GameRoom {
     this.emitToRoom("round_end", {
       round: this.round,
       players: this._publicPlayers(),
+      sharedEaten: this._publicSharedEaten(),
+      firstToFlag: this._firstToFlagUsername(),
       nextRoundInMs: this.config.NEXT_ROUND_PAUSE_MS,
     });
-    setTimeout(() => this._nextRound(), this.config.NEXT_ROUND_PAUSE_MS);
+    this._clearNextRoundTimer();
+    this.nextRoundTimer = setTimeout(() => {
+      this._advancing = false;
+      this._nextRound();
+    }, this.config.NEXT_ROUND_PAUSE_MS);
+  }
+
+  _firstToFlagUsername() {
+    if (!this.firstToFinishSocketId) return null;
+    const player = this.players.get(this.firstToFinishSocketId);
+    return player ? player.username : null;
+  }
+
+  _publicSharedEaten() {
+    return [...this.eatenCells.entries()].map(([k, v]) => {
+      const [col, row] = k.split(",").map(Number);
+      return { col, row, by: v.by, correct: v.correct };
+    });
   }
 
   _nextRound() {
     this._clearTimer();
+    this._clearNextRoundTimer();
+    this._advancing = false;
+    this.eatenCells = new Map();
+    this.firstToFinishSocketId = null;
     this.round += 1;
     if (this.round > this.config.ROUND_COUNT || this._activePlayers().length === 0) {
       this._endGame();
@@ -403,6 +479,7 @@ class GameRoom {
 
   async _endGame() {
     this._clearTimer();
+    this._clearNextRoundTimer();
     this._finalizeCurrentRoundLogs();
     this.status = "gameOver";
 
@@ -440,6 +517,13 @@ class GameRoom {
     if (this.roundTimer) {
       clearTimeout(this.roundTimer);
       this.roundTimer = null;
+    }
+  }
+
+  _clearNextRoundTimer() {
+    if (this.nextRoundTimer) {
+      clearTimeout(this.nextRoundTimer);
+      this.nextRoundTimer = null;
     }
   }
 
@@ -491,6 +575,8 @@ class GameRoom {
       timeLimitMs: this.config.ROUND_TIME_MS,
       startingLives: this.config.STARTING_LIVES,
       players: this._publicPlayers(),
+      sharedEaten: this._publicSharedEaten(),
+      firstToFlag: this._firstToFlagUsername(),
     };
   }
 }

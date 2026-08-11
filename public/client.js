@@ -267,6 +267,7 @@
   const roundTotalEl = document.getElementById("roundTotal");
   const timerFillEl = document.getElementById("timerFill");
   const nextRoundNoteEl = document.getElementById("nextRoundNote");
+  const firstToFlagNoteEl = document.getElementById("firstToFlagNote");
   const roundOneBannerEl = document.getElementById("roundOneBanner");
   const myScoreValEl = document.getElementById("myScoreVal");
   const myLivesEl = document.getElementById("myLives");
@@ -279,6 +280,7 @@
   let muncherEls = new Map(); // socketId -> el
   let myPrev = null; // { score, lives, eaten: Set }
   const animatingKeys = new Set();
+  const appliedSlimeKeys = new Set(); // "col,row" already given their permanent slime tint this round
   let lastPlayers = [];
 
   // Keeps the board from ever overflowing the viewport -- shrinks the cell
@@ -353,6 +355,7 @@
     cellEls.clear();
     muncherEls.clear();
     animatingKeys.clear();
+    appliedSlimeKeys.clear();
     myPrev = null;
     for (const cell of payload.grid) {
       const el = document.createElement("div");
@@ -430,6 +433,48 @@
     }
   }
 
+  function hexToRgba(hex, alpha) {
+    const h = String(hex).replace("#", "");
+    const r = parseInt(h.substring(0, 2), 16);
+    const g = parseInt(h.substring(2, 4), 16);
+    const b = parseInt(h.substring(4, 6), 16);
+    return `rgba(${r},${g},${b},${alpha})`;
+  }
+
+  function markSlimed(cellEl, color) {
+    cellEl.classList.add("slimed");
+    cellEl.style.background = hexToRgba(color, 0.35);
+  }
+
+  // Cells are shared across the whole room (GameRoom._resolveMunch) -- once
+  // anyone eats one it's gone for everyone, tinted in whichever player's
+  // color ate it first. Cells mid-way through *my own* correct/wrong
+  // animation are skipped here; that animation's own callback (see
+  // syncMyBoard) applies the slime tint once it finishes instead, so the
+  // permanent mark doesn't pop in before the transient pop/shake plays.
+  function applySharedEaten(sharedEaten) {
+    for (const entry of sharedEaten) {
+      const key = `${entry.col},${entry.row}`;
+      if (appliedSlimeKeys.has(key) || animatingKeys.has(key)) continue;
+      const cellEl = cellEls.get(key);
+      if (!cellEl) continue;
+      markSlimed(cellEl, colorFor(entry.by));
+      appliedSlimeKeys.add(key);
+    }
+  }
+
+  let announcedFirstToFlag = null;
+  function announceFirstToFlag(username) {
+    if (!username || username === announcedFirstToFlag) return;
+    announcedFirstToFlag = username;
+    const mine = lastPlayers.find((p) => p.socketId === socket.id)?.username === username;
+    firstToFlagNoteEl.textContent = `🏆 ${mine ? "You" : username} reached the flag first! +50`;
+    firstToFlagNoteEl.classList.remove("hidden");
+    firstToFlagNoteEl.style.animation = "none";
+    void firstToFlagNoteEl.offsetWidth;
+    firstToFlagNoteEl.style.animation = "";
+  }
+
   // Sends the eaten emoji flying from its cell over to the lives chip and
   // cracks the shield it "hits", instead of the cell just quietly vanishing.
   function flyToShield(cellEl, shieldEl) {
@@ -462,13 +507,16 @@
   }
 
   // Diffs my own state against the previous update to trigger the right
-  // per-cell animation + sound (correct pop, or wrong-shake + fly-to-shield),
-  // then reconciles every cell's hidden/visible state with the server truth.
+  // per-cell animation + sound (correct pop, or wrong-shake + fly-to-shield)
+  // for cells *I* resolved. Cells someone else already emptied before I
+  // stepped on them get no animation of mine -- applySharedEaten tints
+  // those in the other player's color instead.
   function syncMyBoard(players) {
     const me = players.find((p) => p.socketId === socket.id);
     if (!me) return;
     const eatenSet = new Set(me.eatenCells);
     myScoreValEl.textContent = me.score;
+    const myColor = colorFor(socket.id);
 
     let shieldsRendered = false;
     if (myPrev) {
@@ -481,29 +529,34 @@
       for (const key of newKeys) {
         const cellEl = cellEls.get(key);
         if (!cellEl) continue;
+        if (appliedSlimeKeys.has(key)) continue; // someone else already resolved this one
         animatingKeys.add(key);
         if (correct) {
           cellEl.classList.add("correct-flash");
           window.SFX.correct();
-          setTimeout(() => { cellEl.classList.add("eaten-mine"); animatingKeys.delete(key); }, 260);
+          setTimeout(() => {
+            markSlimed(cellEl, myColor);
+            appliedSlimeKeys.add(key);
+            animatingKeys.delete(key);
+          }, 260);
         } else if (livesLost) {
           cellEl.classList.add("wrong-flash");
           const shieldEl = myLivesEl.querySelectorAll(".shield-icon")[me.lives];
           flyToShield(cellEl, shieldEl);
-          setTimeout(() => { cellEl.classList.add("eaten-mine"); animatingKeys.delete(key); }, 340);
+          setTimeout(() => {
+            markSlimed(cellEl, myColor);
+            appliedSlimeKeys.add(key);
+            animatingKeys.delete(key);
+          }, 340);
         } else {
-          cellEl.classList.add("eaten-mine");
+          // Visited a cell someone else already emptied -- no animation,
+          // applySharedEaten will tint it in their color.
           animatingKeys.delete(key);
         }
       }
     }
 
     if (!shieldsRendered) renderMyShields(me.lives);
-
-    for (const [key, el] of cellEls) {
-      if (animatingKeys.has(key)) continue;
-      el.classList.toggle("eaten-mine", eatenSet.has(key));
-    }
 
     myPrev = { score: me.score, lives: me.lives, eaten: eatenSet };
   }
@@ -524,6 +577,8 @@
   socket.on("round_start", (payload) => {
     showScreen("game");
     hideNextRoundCountdown();
+    firstToFlagNoteEl.classList.add("hidden");
+    announcedFirstToFlag = null;
     roundNumEl.textContent = payload.round;
     roundTotalEl.textContent = payload.totalRounds;
     keywordEl.textContent = payload.keyword;
@@ -531,6 +586,7 @@
     lastPlayers = payload.players;
     renderMunchers(payload.players);
     syncMyBoard(payload.players);
+    applySharedEaten(payload.sharedEaten || []);
     renderScoreboard(payload.players);
     startTimer(payload.timeLimitMs);
     window.SFX.roundStart();
@@ -552,14 +608,26 @@
     lastPlayers = payload.players;
     renderMunchers(payload.players);
     syncMyBoard(payload.players);
+    applySharedEaten(payload.sharedEaten || []);
     renderScoreboard(payload.players);
+    announceFirstToFlag(payload.firstToFlag);
   });
 
   socket.on("round_end", (payload) => {
+    applySharedEaten(payload.sharedEaten || []);
     renderScoreboard(payload.players);
+    announceFirstToFlag(payload.firstToFlag);
     freezeTimer();
     if (payload.nextRoundInMs) showNextRoundCountdown(payload.nextRoundInMs);
   });
+
+  // The server already refuses to process moves once I've reached the flag
+  // (see GameRoom.move's roundDone guard) -- this just avoids firing
+  // pointless "move" events at it while waiting for the next round.
+  function amRoundDone() {
+    const me = lastPlayers.find((p) => p.socketId === socket.id);
+    return !!(me && me.roundDone);
+  }
 
   const DIR_KEYS = {
     ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right",
@@ -571,11 +639,13 @@
     if (!dir) return;
     if (screens.game.classList.contains("hidden")) return;
     e.preventDefault();
+    if (amRoundDone()) return;
     socket.emit("move", { dir });
   });
   document.getElementById("touchpad").addEventListener("click", (e) => {
     const btn = e.target.closest("button[data-dir]");
     if (!btn) return;
+    if (amRoundDone()) return;
     socket.emit("move", { dir: btn.dataset.dir });
   });
 

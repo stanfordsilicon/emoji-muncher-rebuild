@@ -414,12 +414,32 @@ function generateRound(emojiRepository, { cols, rows, minMatches, pathsPerCorner
     }
   }
 
+  // Wrong cells are assigned by cycling through a freshly-shuffled copy of
+  // the wrong-symbol pool (reshuffling once it runs out) instead of an
+  // independent random pick per cell. Independent per-cell sampling can,
+  // by pure chance on a board this size, cluster heavily around just 2-3
+  // symbols -- which makes "correct vs wrong" obvious by repetition count
+  // alone rather than by actually reading the symbol. Cycling guarantees
+  // every wrong symbol shows up roughly equally often instead.
   const grid = [];
+  const wrongPool = wrongSymbols.length > 0 ? wrongSymbols : allSymbols;
+  let shuffledWrong = shuffle(wrongPool);
+  let wrongIdx = 0;
+  const nextWrongSymbol = () => {
+    if (wrongIdx >= shuffledWrong.length) {
+      shuffledWrong = shuffle(wrongPool);
+      wrongIdx = 0;
+    }
+    return shuffledWrong[wrongIdx++];
+  };
+
   for (let row = 0; row < rows; row++) {
     for (let col = 0; col < cols; col++) {
       const isSafe = blob.has(key(col, row));
-      const pool = isSafe ? matchingSymbols : wrongSymbols.length > 0 ? wrongSymbols : allSymbols;
-      grid.push({ col, row, symbol: pool[Math.floor(Math.random() * pool.length)] });
+      const symbol = isSafe
+        ? matchingSymbols[Math.floor(Math.random() * matchingSymbols.length)]
+        : nextWrongSymbol();
+      grid.push({ col, row, symbol });
     }
   }
 
