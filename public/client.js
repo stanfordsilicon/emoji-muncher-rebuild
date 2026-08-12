@@ -102,7 +102,7 @@
 
   function enterRoom(view) {
     currentRoomCode = view.code;
-    applyRoomSnapshot(view);
+    applySnapshotIfFresh(view, nextSeq());
     startPolling();
     startHeartbeat();
   }
@@ -283,9 +283,10 @@
   const startGameBtn = document.getElementById("startGameBtn");
 
   startGameBtn.addEventListener("click", async () => {
+    const seq = nextSeq();
     const res = await api("start-game", {});
     if (!res.ok) return showError(waitingHint, res.error);
-    applyRoomSnapshot(res.room);
+    applySnapshotIfFresh(res.room, seq);
   });
 
   function renderWaitingRoom(view) {
@@ -685,8 +686,9 @@
   const overHint = document.getElementById("overHint");
 
   playAgainBtn.addEventListener("click", async () => {
+    const seq = nextSeq();
     const res = await api("restart-game", {});
-    if (res.ok) applyRoomSnapshot(res.room);
+    if (res.ok) applySnapshotIfFresh(res.room, seq);
   });
 
   function loadAllTimeLeaderboard() {
@@ -718,6 +720,26 @@
     const me = view.players.find((p) => p.playerId === myId);
     playAgainBtn.classList.toggle("hidden", !(me && me.isHost));
     overHint.textContent = me && me.isHost ? "" : "Waiting for the host to start a new game...";
+  }
+
+  // A move's own POST response and the background poller both resolve
+  // asynchronously and can arrive out of order -- e.g. a poll fired just
+  // before a move can still resolve *after* that move's own (faster)
+  // response, carrying the pre-move position. Without a guard, applying it
+  // snaps the muncher back a step right after it moved, then forward again
+  // on the next poll -- which reads as "the arrow keys are laggy," not as
+  // the harmless race it actually is. requestSeq is stamped at the moment
+  // each request is *sent*; whichever response's stamp is highest wins,
+  // regardless of which one's network round-trip happens to finish last.
+  let requestSeq = 0;
+  let appliedSeq = 0;
+  function nextSeq() {
+    return ++requestSeq;
+  }
+  function applySnapshotIfFresh(view, seq) {
+    if (seq < appliedSeq) return;
+    appliedSeq = seq;
+    applyRoomSnapshot(view);
   }
 
   // ---- room snapshot dispatch ----
@@ -767,8 +789,9 @@
     const now = Date.now();
     if (now - lastMoveSentAt < CLIENT_MOVE_THROTTLE_MS) return;
     lastMoveSentAt = now;
+    const seq = nextSeq();
     api("move", { dir }).then((res) => {
-      if (res.ok) applyRoomSnapshot(res.room);
+      if (res.ok) applySnapshotIfFresh(res.room, seq);
     });
   }
 
@@ -803,11 +826,12 @@
   async function pollRoom() {
     if (!currentRoomCode) return;
     let nextStatus = lastRoomView ? lastRoomView.status : "lobby";
+    const seq = nextSeq();
     try {
       const res = await fetch(`/api/room?code=${encodeURIComponent(currentRoomCode)}`);
       const data = await res.json();
       if (data.ok && data.room) {
-        applyRoomSnapshot(data.room);
+        applySnapshotIfFresh(data.room, seq);
         nextStatus = data.room.status;
       }
     } catch (e) {

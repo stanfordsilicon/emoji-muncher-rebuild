@@ -20,7 +20,13 @@ module.exports = {
   STARTING_LIVES: num("STARTING_LIVES", 3),
   POINTS_PER_CORRECT: num("POINTS_PER_CORRECT", 10),
   FIRST_TO_FLAG_BONUS: num("FIRST_TO_FLAG_BONUS", 50),
-  MIN_MATCHES_PER_KEYWORD: num("MIN_MATCHES_PER_KEYWORD", 3),
+  // A keyword with only a handful of matching symbols forces the grid
+  // generator to repeat those same few symbols dozens of times to fill out
+  // safe paths (e.g. a 3-match keyword can end up "safe" on 40+ of 63
+  // cells) -- trivially easy, since almost everything on the board is safe
+  // to eat. Raised from 3 to keep rounds themed around keywords with real
+  // symbol variety instead.
+  MIN_MATCHES_PER_KEYWORD: num("MIN_MATCHES_PER_KEYWORD", 8),
   PATHS_PER_CORNER: num("PATHS_PER_CORNER", 2),
   ROOM_CODE_LENGTH: num("ROOM_CODE_LENGTH", 4),
 };
