@@ -1,12 +1,53 @@
 (function () {
   "use strict";
 
-  const socket = io();
+  // No more persistent Socket.IO connection -- every action is a plain HTTP
+  // request, and room updates arrive via polling instead of a push
+  // broadcast. See server/app.js's top comment for why (Vercel serverless
+  // has no long-lived process to hold a WebSocket open, and no shared
+  // memory between invocations to broadcast from anyway).
+
+  // Player identity is a persistent id kept in sessionStorage (not a
+  // connection id) -- a page refresh gets a brand new HTTP session but
+  // keeps the same device id. sessionStorage rather than localStorage is
+  // deliberate: localStorage is shared by every tab on the same origin, so
+  // two tabs of this game open in one browser would silently collapse into
+  // a single player identity. sessionStorage is scoped to one tab.
+  function getDeviceId() {
+    let id = sessionStorage.getItem("munchers_device_id");
+    if (!id) {
+      id = window.crypto && window.crypto.randomUUID
+        ? window.crypto.randomUUID()
+        : `p_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+      sessionStorage.setItem("munchers_device_id", id);
+    }
+    return id;
+  }
+  const myId = getDeviceId();
+
+  let currentRoomCode = null;
+
+  async function api(action, payload) {
+    const body = Object.assign({}, payload);
+    body.playerId = myId;
+    if (currentRoomCode && !body.code) body.code = currentRoomCode;
+    try {
+      const res = await fetch(`/api/${action}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      return await res.json();
+    } catch (e) {
+      return { ok: false, error: "Connection error — please try again." };
+    }
+  }
+
   const COLORS = ["#ffca28", "#29b6f6", "#ef5350", "#ab47bc", "#66bb6a", "#ff7043"];
-  const colorBySocket = new Map();
-  function colorFor(socketId) {
-    if (!colorBySocket.has(socketId)) colorBySocket.set(socketId, COLORS[colorBySocket.size % COLORS.length]);
-    return colorBySocket.get(socketId);
+  const colorByPlayer = new Map();
+  function colorFor(playerId) {
+    if (!colorByPlayer.has(playerId)) colorByPlayer.set(playerId, COLORS[colorByPlayer.size % COLORS.length]);
+    return colorByPlayer.get(playerId);
   }
 
   // ---- screens ----
@@ -59,30 +100,41 @@
     return name;
   }
 
-  document.getElementById("createRoomBtn").addEventListener("click", () => {
+  function enterRoom(view) {
+    currentRoomCode = view.code;
+    applyRoomSnapshot(view);
+    startPolling();
+    startHeartbeat();
+  }
+
+  document.getElementById("createRoomBtn").addEventListener("click", async () => {
     const username = getUsername();
     if (!username) return;
-    socket.emit("create_room", { username });
+    const res = await api("create-room", { username, token: sessionToken });
+    if (!res.ok) return showError(lobbyError, res.error);
+    enterRoom(res.room);
   });
 
-  document.getElementById("joinRoomBtn").addEventListener("click", () => {
+  document.getElementById("joinRoomBtn").addEventListener("click", async () => {
     const username = getUsername();
     if (!username) return;
     const code = roomCodeInput.value.trim().toUpperCase();
     if (!code) return showError(lobbyError, "Enter a room code.");
-    socket.emit("join_room", { username, code });
+    const res = await api("join-room", { username, code, token: sessionToken });
+    if (!res.ok) return showError(lobbyError, res.error);
+    enterRoom(res.room);
   });
 
   // Skips the waiting-room/share-code step entirely -- a private room,
   // started immediately with just this player. Deliberately never carries
   // an arcade room code even when one is present: choosing solo means
   // opting out of the shared party for this game, not joining it solo.
-  let pendingSolo = false;
-  document.getElementById("playSoloBtn").addEventListener("click", () => {
+  document.getElementById("playSoloBtn").addEventListener("click", async () => {
     const username = getUsername();
     if (!username) return;
-    pendingSolo = true;
-    socket.emit("create_room", { username, solo: true });
+    const res = await api("create-room", { username, solo: true, token: sessionToken });
+    if (!res.ok) return showError(lobbyError, res.error);
+    enterRoom(res.room);
   });
 
   // ---- accounts: sign in / sign up / My Stats ----
@@ -90,6 +142,8 @@
   // an account is only needed to protect a name and look up personal stats
   // later, never required to play.
   const SESSION_TOKEN_KEY = "emojimunchers_session_token";
+  let sessionToken = localStorage.getItem(SESSION_TOKEN_KEY) || null;
+
   const accountToggleBtn = document.getElementById("accountToggleBtn");
   const authForm = document.getElementById("authForm");
   const authUsernameInput = document.getElementById("authUsername");
@@ -122,34 +176,37 @@
   function handleAuthResponse(res) {
     if (!res.ok) { authErrorEl.textContent = res.error; return; }
     authErrorEl.textContent = "";
+    sessionToken = res.token;
     localStorage.setItem(SESSION_TOKEN_KEY, res.token);
     authForm.classList.add("hidden");
     applySignedIn(res.username);
   }
 
-  document.getElementById("signUpBtn").addEventListener("click", () => {
-    socket.emit("sign_up", { username: authUsernameInput.value.trim(), password: authPasswordInput.value }, handleAuthResponse);
+  document.getElementById("signUpBtn").addEventListener("click", async () => {
+    const res = await api("sign-up", { username: authUsernameInput.value.trim(), password: authPasswordInput.value });
+    handleAuthResponse(res);
   });
-  document.getElementById("signInBtn").addEventListener("click", () => {
-    socket.emit("sign_in", { username: authUsernameInput.value.trim(), password: authPasswordInput.value }, handleAuthResponse);
+  document.getElementById("signInBtn").addEventListener("click", async () => {
+    const res = await api("sign-in", { username: authUsernameInput.value.trim(), password: authPasswordInput.value });
+    handleAuthResponse(res);
   });
-  document.getElementById("signOutBtn").addEventListener("click", () => {
-    socket.emit("sign_out", { token: localStorage.getItem(SESSION_TOKEN_KEY) });
+  document.getElementById("signOutBtn").addEventListener("click", async () => {
+    await api("sign-out", { token: sessionToken });
+    sessionToken = null;
     localStorage.removeItem(SESSION_TOKEN_KEY);
     applySignedOut();
   });
 
-  document.getElementById("myStatsBtn").addEventListener("click", () => {
-    socket.emit("get_my_stats", {}, (res) => {
-      if (!res.ok) return;
-      const s = res.stats;
-      statsList.innerHTML = `
-        <li><span>Games played</span><span>${s.gamesPlayed}</span></li>
-        <li><span>Best score</span><span>💯 ${s.bestScore}</span></li>
-        <li><span>Total score</span><span>💯 ${s.totalScore}</span></li>
-        <li><span>Last played</span><span>${s.lastPlayedAt ? new Date(s.lastPlayedAt).toLocaleString() : "—"}</span></li>`;
-      statsModalBackdrop.classList.remove("hidden");
-    });
+  document.getElementById("myStatsBtn").addEventListener("click", async () => {
+    const res = await api("get-my-stats", { token: sessionToken });
+    if (!res.ok) return;
+    const s = res.stats;
+    statsList.innerHTML = `
+      <li><span>Games played</span><span>${s.gamesPlayed}</span></li>
+      <li><span>Best score</span><span>💯 ${s.bestScore}</span></li>
+      <li><span>Total score</span><span>💯 ${s.totalScore}</span></li>
+      <li><span>Last played</span><span>${s.lastPlayedAt ? new Date(s.lastPlayedAt).toLocaleString() : "—"}</span></li>`;
+    statsModalBackdrop.classList.remove("hidden");
   });
   document.getElementById("statsCloseBtn").addEventListener("click", () => statsModalBackdrop.classList.add("hidden"));
   statsModalBackdrop.addEventListener("click", (e) => {
@@ -157,13 +214,11 @@
   });
 
   // Silent restore from a saved session token on page load.
-  (function restoreSession() {
-    const token = localStorage.getItem(SESSION_TOKEN_KEY);
-    if (!token) return;
-    socket.emit("sign_in_with_token", { token }, (res) => {
-      if (res && res.ok) applySignedIn(res.username);
-      else localStorage.removeItem(SESSION_TOKEN_KEY);
-    });
+  (async function restoreSession() {
+    if (!sessionToken) return;
+    const res = await api("sign-in-with-token", { token: sessionToken });
+    if (res && res.ok) applySignedIn(res.username);
+    else { sessionToken = null; localStorage.removeItem(SESSION_TOKEN_KEY); }
   })();
 
   // ---- QMoji Arcade: party continuity from the homescreen ----
@@ -197,18 +252,17 @@
     if (me) {
       // Known party member — skip the manual entry screen entirely.
       usernameInput.value = me.name;
-      let createFallbackSent = false;
-      const cleanup = () => { socket.off("error_message", onError); socket.off("lobby_state", cleanup); };
-      const onError = ({ message }) => {
-        if (createFallbackSent || message !== "Room not found") return;
-        createFallbackSent = true;
+      const res = await api("join-room", { username: me.name, code: arcadeRoomCode, token: sessionToken });
+      if (res.ok) {
+        enterRoom(res.room);
+        return;
+      }
+      if (res.error === "Room not found") {
         // First arcade player to reach this game — seed a room under the
         // party's own code instead of letting the server generate one.
-        socket.emit("create_room", { username: me.name, code: arcadeRoomCode });
-      };
-      socket.on("error_message", onError);
-      socket.once("lobby_state", cleanup);
-      socket.emit("join_room", { username: me.name, code: arcadeRoomCode });
+        const created = await api("create-room", { username: me.name, code: arcadeRoomCode, token: sessionToken });
+        if (created.ok) enterRoom(created.room);
+      }
     } else {
       // A raw game link was opened directly (not routed through the
       // homescreen) — let them type a name as usual, but also enroll them
@@ -228,36 +282,27 @@
   const waitingHint = document.getElementById("waitingHint");
   const startGameBtn = document.getElementById("startGameBtn");
 
-  startGameBtn.addEventListener("click", () => socket.emit("start_game"));
+  startGameBtn.addEventListener("click", async () => {
+    const res = await api("start-game", {});
+    if (!res.ok) return showError(waitingHint, res.error);
+    applyRoomSnapshot(res.room);
+  });
 
-  socket.on("lobby_state", (payload) => {
-    if (payload.status !== "lobby") return;
-    // Consume the flag exactly once -- round_start is about to fire
-    // immediately after a solo create, so don't flash the waiting screen.
-    const skipForSolo = pendingSolo;
-    pendingSolo = false;
-    if (skipForSolo) return;
+  function renderWaitingRoom(view) {
     showScreen("waiting");
-    waitingCode.textContent = payload.code;
+    waitingCode.textContent = view.code;
     waitingPlayers.innerHTML = "";
     let amHost = false;
-    for (const p of payload.players) {
-      if (p.socketId === socket.id && p.isHost) amHost = true;
+    for (const p of view.players) {
+      if (p.playerId === myId && p.isHost) amHost = true;
       const li = document.createElement("li");
-      li.innerHTML = `<span><span class="swatch" style="background:${colorFor(p.socketId)}"></span>${escapeHtml(p.username)}${p.isHost ? " (host)" : ""}</span>`;
+      li.innerHTML = `<span><span class="swatch" style="background:${colorFor(p.playerId)}"></span>${escapeHtml(p.username)}${p.isHost ? " (host)" : ""}</span>`;
       waitingPlayers.appendChild(li);
     }
     startGameBtn.classList.toggle("hidden", !amHost);
     waitingHint.textContent = amHost ? "" : "Waiting for the host to start the game...";
-  });
-
-  socket.on("error_message", ({ message }) => {
-    pendingSolo = false; // whatever was pending failed -- don't suppress the next lobby_state
-    const visible = Object.keys(screens).find((k) => !screens[k].classList.contains("hidden"));
-    if (visible === "lobby") showError(lobbyError, message);
-    else if (visible === "waiting") showError(waitingHint, message);
-    else console.warn(message);
-  });
+    lastPlayers = view.players;
+  }
 
   // ---- game screen ----
   const boardEl = document.getElementById("board");
@@ -277,7 +322,7 @@
   let cols = 9, rows = 7;
   let startingLives = 3;
   let cellEls = new Map(); // "col,row" -> el
-  let muncherEls = new Map(); // socketId -> el
+  let muncherEls = new Map(); // playerId -> el
   let myPrev = null; // { score, lives, eaten: Set }
   const animatingKeys = new Set();
   const appliedSlimeKeys = new Set(); // "col,row" already given their permanent slime tint this round
@@ -334,9 +379,13 @@
 
   // ---- go home (available in-game and post-game; deliberately absent from
   // the waiting-room screen so players can't slip out of an active lobby) ----
-  function goHome() {
-    socket.emit("leave_room");
-    colorBySocket.clear();
+  async function goHome() {
+    await api("leave-room", {});
+    stopPolling();
+    stopHeartbeat();
+    currentRoomCode = null;
+    lastRoomView = null;
+    colorByPlayer.clear();
     cellEls.clear();
     muncherEls.clear();
     animatingKeys.clear();
@@ -347,9 +396,24 @@
   document.getElementById("homeBtnGame").addEventListener("click", goHome);
   document.getElementById("homeBtnOver").addEventListener("click", goHome);
 
-  function renderGrid(payload) {
-    cols = payload.cols; rows = payload.rows;
-    startingLives = payload.startingLives || startingLives;
+  // Explicit "leaving right now" signal for the common case (closing the
+  // tab) — sendBeacon is used because a plain fetch can get cancelled
+  // mid-flight when the page unloads. The heartbeat timeout on the server
+  // is the fallback for real drops (crash, network loss) where this never
+  // fires.
+  window.addEventListener("pagehide", () => {
+    if (!currentRoomCode || !navigator.sendBeacon) return;
+    try {
+      const blob = new Blob([JSON.stringify({ code: currentRoomCode, playerId: myId })], { type: "application/json" });
+      navigator.sendBeacon("/api/leave-room", blob);
+    } catch (e) {
+      // best-effort only
+    }
+  });
+
+  function renderGrid(view) {
+    cols = view.cols; rows = view.rows;
+    startingLives = view.startingLives || startingLives;
     applyCellSize(computeCellSize(cols, rows));
     boardEl.innerHTML = "";
     cellEls.clear();
@@ -357,7 +421,7 @@
     animatingKeys.clear();
     appliedSlimeKeys.clear();
     myPrev = null;
-    for (const cell of payload.grid) {
+    for (const cell of view.grid) {
       const el = document.createElement("div");
       el.className = "cell";
       el.textContent = cell.symbol;
@@ -366,8 +430,8 @@
       boardEl.appendChild(el);
       cellEls.set(`${cell.col},${cell.row}`, el);
     }
-    if (payload.destination) {
-      const destEl = cellEls.get(`${payload.destination.col},${payload.destination.row}`);
+    if (view.destination) {
+      const destEl = cellEls.get(`${view.destination.col},${view.destination.row}`);
       if (destEl) destEl.classList.add("destination");
     }
   }
@@ -391,45 +455,38 @@
     timerFillEl.style.width = currentWidth;
   }
 
-  let nextRoundCountdownTimer = null;
-  function showNextRoundCountdown(ms) {
-    clearInterval(nextRoundCountdownTimer);
-    let remaining = Math.ceil(ms / 1000);
-    const tick = () => {
-      nextRoundNoteEl.textContent = remaining > 0 ? `Next round in ${remaining}…` : "Next round…";
-      nextRoundNoteEl.classList.remove("hidden");
-      remaining -= 1;
-    };
-    tick();
-    nextRoundCountdownTimer = setInterval(() => {
-      if (remaining < 0) { clearInterval(nextRoundCountdownTimer); return; }
-      tick();
-    }, 1000);
+  // Recomputed directly from the room's absolute nextRoundAt on every poll
+  // (rather than a local setInterval counting down on its own) so it stays
+  // correct regardless of poll timing/drift, a backgrounded tab, etc.
+  function updateNextRoundCountdown(view) {
+    if (!view.nextRoundAt) { hideNextRoundCountdown(); return; }
+    const remaining = Math.max(0, Math.ceil((view.nextRoundAt - Date.now()) / 1000));
+    nextRoundNoteEl.textContent = remaining > 0 ? `Next round in ${remaining}…` : "Next round…";
+    nextRoundNoteEl.classList.remove("hidden");
   }
   function hideNextRoundCountdown() {
-    clearInterval(nextRoundCountdownTimer);
     nextRoundNoteEl.classList.add("hidden");
   }
 
   function renderMunchers(players) {
     const seen = new Set();
     for (const p of players) {
-      seen.add(p.socketId);
-      let el = muncherEls.get(p.socketId);
+      seen.add(p.playerId);
+      let el = muncherEls.get(p.playerId);
       if (!el) {
         el = document.createElement("div");
         el.className = "muncher";
         boardEl.appendChild(el);
-        muncherEls.set(p.socketId, el);
+        muncherEls.set(p.playerId, el);
       }
-      el.style.background = colorFor(p.socketId);
+      el.style.background = colorFor(p.playerId);
       el.style.left = (p.muncherCol * cellSize) + "px";
       el.style.top = (p.muncherRow * cellSize) + "px";
       el.style.opacity = p.eliminated ? "0.35" : "1";
       el.textContent = (p.username || "?").slice(0, 1).toUpperCase();
     }
-    for (const [socketId, el] of muncherEls) {
-      if (!seen.has(socketId)) { el.remove(); muncherEls.delete(socketId); }
+    for (const [playerId, el] of muncherEls) {
+      if (!seen.has(playerId)) { el.remove(); muncherEls.delete(playerId); }
     }
   }
 
@@ -446,7 +503,7 @@
     cellEl.style.background = hexToRgba(color, 0.35);
   }
 
-  // Cells are shared across the whole room (GameRoom._resolveMunch) -- once
+  // Cells are shared across the whole room (GameRoom's resolveMunch) -- once
   // anyone eats one it's gone for everyone, tinted in whichever player's
   // color ate it first. Cells mid-way through *my own* correct/wrong
   // animation are skipped here; that animation's own callback (see
@@ -467,7 +524,7 @@
   function announceFirstToFlag(username) {
     if (!username || username === announcedFirstToFlag) return;
     announcedFirstToFlag = username;
-    const mine = lastPlayers.find((p) => p.socketId === socket.id)?.username === username;
+    const mine = lastPlayers.find((p) => p.playerId === myId)?.username === username;
     firstToFlagNoteEl.textContent = `🏆 ${mine ? "You" : username} reached the flag first! +50`;
     firstToFlagNoteEl.classList.remove("hidden");
     firstToFlagNoteEl.style.animation = "none";
@@ -512,11 +569,11 @@
   // stepped on them get no animation of mine -- applySharedEaten tints
   // those in the other player's color instead.
   function syncMyBoard(players) {
-    const me = players.find((p) => p.socketId === socket.id);
+    const me = players.find((p) => p.playerId === myId);
     if (!me) return;
     const eatenSet = new Set(me.eatenCells);
     myScoreValEl.textContent = me.score;
-    const myColor = colorFor(socket.id);
+    const myColor = colorFor(myId);
 
     let shieldsRendered = false;
     if (myPrev) {
@@ -568,30 +625,30 @@
       const li = document.createElement("li");
       if (p.eliminated) li.classList.add("eliminated");
       li.innerHTML = `
-        <span class="name"><span class="dot" style="background:${colorFor(p.socketId)}"></span>${escapeHtml(p.username)}${p.socketId === socket.id ? " (you)" : ""}</span>
+        <span class="name"><span class="dot" style="background:${colorFor(p.playerId)}"></span>${escapeHtml(p.username)}${p.playerId === myId ? " (you)" : ""}</span>
         <span>💯 ${p.score}${p.eliminated ? "" : " &nbsp; " + shieldRow(p.lives, startingLives, true)}</span>`;
       scoreboardListEl.appendChild(li);
     }
   }
 
-  socket.on("round_start", (payload) => {
+  function applyRoundStart(view) {
     showScreen("game");
     hideNextRoundCountdown();
     firstToFlagNoteEl.classList.add("hidden");
     announcedFirstToFlag = null;
-    roundNumEl.textContent = payload.round;
-    roundTotalEl.textContent = payload.totalRounds;
-    keywordEl.textContent = payload.keyword;
-    renderGrid(payload);
-    lastPlayers = payload.players;
-    renderMunchers(payload.players);
-    syncMyBoard(payload.players);
-    applySharedEaten(payload.sharedEaten || []);
-    renderScoreboard(payload.players);
-    startTimer(payload.timeLimitMs);
+    roundNumEl.textContent = view.round;
+    roundTotalEl.textContent = view.totalRounds;
+    keywordEl.textContent = view.keyword;
+    renderGrid(view);
+    lastPlayers = view.players;
+    renderMunchers(view.players);
+    syncMyBoard(view.players);
+    applySharedEaten(view.sharedEaten || []);
+    renderScoreboard(view.players);
+    startTimer(view.timeLimitMs);
     window.SFX.roundStart();
 
-    if (payload.round === 1) {
+    if (view.round === 1) {
       roundOneBannerEl.classList.remove("hidden");
       // Re-trigger the CSS fade-out animation on every fresh round 1 (a
       // "Play Again" restart reuses the same element).
@@ -602,31 +659,117 @@
     } else {
       roundOneBannerEl.classList.add("hidden");
     }
-  });
+  }
 
-  socket.on("state_update", (payload) => {
-    lastPlayers = payload.players;
-    renderMunchers(payload.players);
-    syncMyBoard(payload.players);
-    applySharedEaten(payload.sharedEaten || []);
-    renderScoreboard(payload.players);
-    announceFirstToFlag(payload.firstToFlag);
-  });
+  function applyStateUpdate(view) {
+    lastPlayers = view.players;
+    renderMunchers(view.players);
+    syncMyBoard(view.players);
+    applySharedEaten(view.sharedEaten || []);
+    renderScoreboard(view.players);
+    announceFirstToFlag(view.firstToFlag);
+  }
 
-  socket.on("round_end", (payload) => {
-    applySharedEaten(payload.sharedEaten || []);
-    renderScoreboard(payload.players);
-    announceFirstToFlag(payload.firstToFlag);
+  function applyRoundEnd(view) {
+    lastPlayers = view.players;
+    applySharedEaten(view.sharedEaten || []);
+    renderScoreboard(view.players);
+    announceFirstToFlag(view.firstToFlag);
     freezeTimer();
-    if (payload.nextRoundInMs) showNextRoundCountdown(payload.nextRoundInMs);
+    updateNextRoundCountdown(view);
+  }
+
+  const finalScoreboardEl = document.getElementById("finalScoreboard");
+  const leaderboardListEl = document.getElementById("leaderboardList");
+  const playAgainBtn = document.getElementById("playAgainBtn");
+  const overHint = document.getElementById("overHint");
+
+  playAgainBtn.addEventListener("click", async () => {
+    const res = await api("restart-game", {});
+    if (res.ok) applyRoomSnapshot(res.room);
   });
 
-  // The server already refuses to process moves once I've reached the flag
-  // (see GameRoom.move's roundDone guard) -- this just avoids firing
-  // pointless "move" events at it while waiting for the next round.
+  function loadAllTimeLeaderboard() {
+    fetch("/api/leaderboard")
+      .then((res) => res.json())
+      .then((data) => {
+        leaderboardListEl.innerHTML = "";
+        for (const entry of data.leaderboard || []) {
+          const li = document.createElement("li");
+          li.innerHTML = `<span>${escapeHtml(entry.username)}</span><span>best 💯 ${entry.bestScore} · ${entry.gamesPlayed} games</span>`;
+          leaderboardListEl.appendChild(li);
+        }
+      })
+      .catch(() => { leaderboardListEl.innerHTML = ""; });
+  }
+
+  function applyGameOver(view) {
+    showScreen("over");
+    window.SFX.gameOver();
+    lastPlayers = view.players;
+    const sorted = [...view.players].sort((a, b) => b.score - a.score);
+    finalScoreboardEl.innerHTML = "";
+    sorted.forEach((p, i) => {
+      const li = document.createElement("li");
+      li.innerHTML = `<span><span class="swatch" style="background:${colorFor(p.playerId)}"></span>#${i + 1} ${escapeHtml(p.username)}${p.playerId === myId ? " (you)" : ""}</span><span>💯 ${p.score}</span>`;
+      finalScoreboardEl.appendChild(li);
+    });
+    loadAllTimeLeaderboard();
+    const me = view.players.find((p) => p.playerId === myId);
+    playAgainBtn.classList.toggle("hidden", !(me && me.isHost));
+    overHint.textContent = me && me.isHost ? "" : "Waiting for the host to start a new game...";
+  }
+
+  // ---- room snapshot dispatch ----
+  // Every poll tick and every action response hands over a full room
+  // snapshot; this decides which screen it implies and whether it's a
+  // meaningfully new state (a fresh round, fresh results) or just the same
+  // one with a minor change (a move, a reveal, a roster update) so the game
+  // screen doesn't reset the grid/timer/animations on every poll.
+  let lastRoomView = null;
+  function applyRoomSnapshot(view) {
+    const prev = lastRoomView;
+    lastRoomView = view;
+
+    if (view.status === "lobby") {
+      renderWaitingRoom(view);
+      return;
+    }
+    if (view.status === "playing") {
+      const isNewRound = !prev || prev.status !== "playing" || prev.round !== view.round;
+      if (isNewRound) applyRoundStart(view);
+      else applyStateUpdate(view);
+      return;
+    }
+    if (view.status === "roundEnd") {
+      applyRoundEnd(view);
+      return;
+    }
+    if (view.status === "gameOver") {
+      if (!prev || prev.status !== "gameOver") applyGameOver(view);
+      return;
+    }
+  }
+
   function amRoundDone() {
-    const me = lastPlayers.find((p) => p.socketId === socket.id);
+    const me = lastPlayers.find((p) => p.playerId === myId);
     return !!(me && me.roundDone);
+  }
+
+  // Mirrors (and is deliberately a hair above) the server's own
+  // MOVE_COOLDOWN_MS -- purely a client-side request-rate throttle so
+  // holding a key down doesn't fire a POST for every OS key-repeat tick;
+  // the server remains the sole authority on whether a move is accepted.
+  const CLIENT_MOVE_THROTTLE_MS = 180;
+  let lastMoveSentAt = 0;
+  function sendMove(dir) {
+    if (amRoundDone()) return;
+    const now = Date.now();
+    if (now - lastMoveSentAt < CLIENT_MOVE_THROTTLE_MS) return;
+    lastMoveSentAt = now;
+    api("move", { dir }).then((res) => {
+      if (res.ok) applyRoomSnapshot(res.room);
+    });
   }
 
   const DIR_KEYS = {
@@ -639,42 +782,59 @@
     if (!dir) return;
     if (screens.game.classList.contains("hidden")) return;
     e.preventDefault();
-    if (amRoundDone()) return;
-    socket.emit("move", { dir });
+    sendMove(dir);
   });
   document.getElementById("touchpad").addEventListener("click", (e) => {
     const btn = e.target.closest("button[data-dir]");
     if (!btn) return;
-    if (amRoundDone()) return;
-    socket.emit("move", { dir: btn.dataset.dir });
+    sendMove(btn.dataset.dir);
   });
 
-  // ---- game over screen ----
-  const finalScoreboardEl = document.getElementById("finalScoreboard");
-  const leaderboardListEl = document.getElementById("leaderboardList");
-  const playAgainBtn = document.getElementById("playAgainBtn");
-  const overHint = document.getElementById("overHint");
-
-  playAgainBtn.addEventListener("click", () => socket.emit("restart_game"));
-
-  socket.on("game_over", (payload) => {
-    showScreen("over");
-    window.SFX.gameOver();
-    const sorted = [...payload.players].sort((a, b) => b.score - a.score);
-    finalScoreboardEl.innerHTML = "";
-    sorted.forEach((p, i) => {
-      const li = document.createElement("li");
-      li.innerHTML = `<span><span class="swatch" style="background:${colorFor(p.socketId)}"></span>#${i + 1} ${escapeHtml(p.username)}${p.socketId === socket.id ? " (you)" : ""}</span><span>💯 ${p.score}</span>`;
-      finalScoreboardEl.appendChild(li);
-    });
-    leaderboardListEl.innerHTML = "";
-    for (const entry of payload.leaderboard) {
-      const li = document.createElement("li");
-      li.innerHTML = `<span>${escapeHtml(entry.username)}</span><span>best 💯 ${entry.bestScore} · ${entry.gamesPlayed} games</span>`;
-      leaderboardListEl.appendChild(li);
+  // ---- polling + presence ----
+  // Two speeds: a slow roster-only poll in the lobby/waiting room, and a
+  // fast one during active play so opponent movement stays close to the
+  // old instant-broadcast feel -- helped along by .muncher's existing CSS
+  // position transition (style.css), which smooths out the gap between
+  // polls rather than snapping.
+  let pollTimer = null;
+  function pollIntervalFor(status) {
+    return status === "playing" || status === "roundEnd" ? 280 : 2000;
+  }
+  async function pollRoom() {
+    if (!currentRoomCode) return;
+    let nextStatus = lastRoomView ? lastRoomView.status : "lobby";
+    try {
+      const res = await fetch(`/api/room?code=${encodeURIComponent(currentRoomCode)}`);
+      const data = await res.json();
+      if (data.ok && data.room) {
+        applyRoomSnapshot(data.room);
+        nextStatus = data.room.status;
+      }
+    } catch (e) {
+      // transient network hiccup — the next tick retries
     }
-    const me = payload.players.find((p) => p.socketId === socket.id);
-    playAgainBtn.classList.toggle("hidden", !(me && me.isHost));
-    overHint.textContent = me && me.isHost ? "" : "Waiting for the host to start a new game...";
-  });
+    if (currentRoomCode) pollTimer = setTimeout(pollRoom, pollIntervalFor(nextStatus));
+  }
+  function startPolling() {
+    stopPolling();
+    pollRoom();
+  }
+  function stopPolling() {
+    clearTimeout(pollTimer);
+    pollTimer = null;
+  }
+
+  // Replaces Socket.IO's automatic disconnect detection — there's no
+  // persistent connection left for the server to notice a drop with.
+  let heartbeatTimer = null;
+  function startHeartbeat() {
+    stopHeartbeat();
+    heartbeatTimer = setInterval(() => {
+      if (currentRoomCode) api("heartbeat", {});
+    }, 4000);
+  }
+  function stopHeartbeat() {
+    clearInterval(heartbeatTimer);
+    heartbeatTimer = null;
+  }
 })();

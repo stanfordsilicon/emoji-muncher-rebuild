@@ -1,6 +1,31 @@
 "use strict";
 
+const config = require("../config");
+const { emojiRepository } = require("../data");
 const { generateRound } = require("./gridGenerator");
+
+/**
+ * Core game rules for one Emoji Munchers match, as plain-JSON room state
+ * plus pure functions operating on it -- no class instances, no live
+ * setTimeout handles, no Map/Set fields, and no Socket.IO/networking
+ * knowledge here at all. That's what makes a room safe to persist to Mongo
+ * (server/game/store.js) and reload in a completely different process or
+ * serverless invocation, and it's also why there's no `emitToRoom` anymore:
+ * there's nothing to broadcast to, only state for a poller to read back.
+ *
+ * Round timeouts and the pause between rounds used to be driven by live
+ * `setTimeout` handles kept as instance fields (`this.roundTimer`,
+ * `this.nextRoundTimer`) -- those can't survive across invocations, so
+ * instead every room load "catches up" any time-driven state via
+ * applyLazyStateUpdates() before anything else happens to it. See
+ * server/game/LobbyManager.js's loadRoom() for where that gets called.
+ *
+ * Player identity is a client-generated id (see public/client.js's
+ * getDeviceId()), NOT a Socket.io socket id -- there's no persistent
+ * connection to derive one from anymore, and this also means a refresh or
+ * brief network drop no longer has to permanently evict the player (see
+ * heartbeat() and the disconnect-grace handling in applyLazyStateUpdates).
+ */
 
 const DIRS = {
   up: [0, -1],
@@ -18,567 +43,583 @@ const CORNERS = [
 
 const NEIGHBOR_OFFSETS = [[1, 0], [-1, 0], [0, 1], [0, -1]];
 
+// How long a disconnected player's seat stays warm before they're actually
+// removed from the room -- long enough to survive a page refresh or a
+// closed tab, without leaving stale seats forever.
+const DISCONNECT_GRACE_MS = 5 * 60 * 1000;
+
+// A player is considered disconnected once their heartbeat goes quiet for
+// this long -- comfortably above the client's heartbeat interval so a
+// couple of missed beats don't falsely flag someone as gone.
+const HEARTBEAT_TIMEOUT_MS = 15 * 1000;
+
 function clamp(v, lo, hi) {
   return Math.max(lo, Math.min(hi, v));
 }
 
-/**
- * One multiplayer match. All players in a room see the identical keyword
- * and grid layout each round, but every player munches through their own
- * copy independently: separate muncher position, separate eaten-cell set,
- * separate score/lives. The server is authoritative for movement and for
- * correctness (checked against emojiRepository) so a client can never
- * fake a correct answer.
- *
- * It also accumulates the QMoji analytics data points for each player as
- * the match plays out (player.matchLog), then flushes one complete
- * "gamesessions" document per player at game-over via analyticsRepository
- * -- matching the one-document-per-player-per-match shape used by the other
- * QMoji mini-games, rather than writing many small documents as events
- * happen. That flush is fire-and-forget: the repository swallows its own
- * errors, so a slow or unreachable database can never affect gameplay.
- */
-class GameRoom {
-  constructor(code, { config, emojiRepository, scoreRepository, analyticsRepository, emitToRoom }) {
-    this.code = code;
-    this.config = config;
-    this.emojiRepository = emojiRepository;
-    this.scoreRepository = scoreRepository;
-    this.analyticsRepository = analyticsRepository;
-    this.emitToRoom = emitToRoom; // (event, payload) => void, scoped to this room
+function createRoom(code) {
+  return {
+    code,
+    status: "lobby", // lobby | playing | roundEnd | gameOver
+    hostId: null,
+    players: {}, // playerId -> player state
+    playerOrder: [],
+    round: 0,
+    keyword: null,
+    grid: [],
+    correctCount: 0,
+    destination: null,
+    eatenCells: {}, // "col,row" -> { by, symbol, correct }, shared across the room
+    firstToFinishPlayerId: null, // reset every round
+    gameStartedAt: null,
+    gameEndedAt: null,
+    roundStartedAt: null,
+    roundEndsAt: null, // replaces the old live roundTimer
+    nextRoundAt: null, // replaces the old live nextRoundTimer
+    roundFinalizedFor: -1, // round number already finalized, guards double-finalization
+    analyticsSaved: false, // guards double-writing score/analytics on game over
+    createdAt: Date.now(),
+  };
+}
 
-    this.players = new Map(); // socketId -> player state
-    this.hostSocketId = null;
-    this.status = "lobby"; // lobby | playing | gameOver
-    this.round = 0;
-    this.keyword = null;
-    this.grid = [];
-    this.correctCount = 0;
-    this.destination = null;
-    this.roundTimer = null;
-    this.nextRoundTimer = null;
-    this._advancing = false; // true from the moment a round is confirmed over until _nextRound() actually runs -- guards against scheduling the "next round" timer more than once for the same round
+function makePlayer(playerId, username) {
+  return {
+    id: playerId,
+    username,
+    score: 0,
+    lives: config.STARTING_LIVES,
+    muncherCol: 0,
+    muncherRow: 0,
+    eaten: [],
+    correctRemaining: 0,
+    roundDone: false,
+    destinationReached: false,
+    eliminated: false,
+    connected: true,
+    lastSeenAt: Date.now(),
+    disconnectedAt: null,
+    lastMoveAt: 0,
+    // analytics bookkeeping, reset every match/round below
+    eatOrder: 0,
+    lastActionAt: 0,
+    firstInputAt: null,
+    firstCorrectAt: null,
+    currentRoundEntry: null,
+    matchLog: { rounds: [] },
+  };
+}
 
-    // Cells are shared across the whole room, not per-player: once anyone
-    // eats one it's gone for everyone else too. Reset every round.
-    this.eatenCells = new Map(); // "col,row" -> { by: socketId, symbol, correct }
-    this.firstToFinishSocketId = null; // reset every round; whoever reaches the flag first gets the bonus
+function isEmpty(room) {
+  return room.playerOrder.length === 0;
+}
 
-    this.gameStartedAt = null;
-    this.roundStartedAt = null;
-    this._roundFinalizedFor = -1; // round number already finalized, guards double-finalization
+// ---- lobby ----
+
+function addPlayer(room, playerId, username) {
+  const existing = room.players[playerId];
+  if (existing) {
+    // Already a member -- a rejoin after a brief disconnect, or a duplicate
+    // join from the same device -- treat as reconnect rather than erroring.
+    existing.connected = true;
+    existing.disconnectedAt = null;
+    existing.lastSeenAt = Date.now();
+    if (username) existing.username = username;
+    return;
   }
+  if (room.status !== "lobby") throw new Error("Game already in progress");
+  room.players[playerId] = makePlayer(playerId, username);
+  room.playerOrder.push(playerId);
+  if (!room.hostId) room.hostId = playerId;
+}
 
-  // ---- lobby ----
+function reassignHostIfNeeded(room, departingId) {
+  if (room.hostId !== departingId) return;
+  room.hostId =
+    room.playerOrder.find((id) => id !== departingId && room.players[id] && room.players[id].connected) ||
+    room.playerOrder.find((id) => id !== departingId) ||
+    null;
+}
 
-  addPlayer(socketId, username) {
-    if (this.status !== "lobby") {
-      throw new Error("Game already in progress");
-    }
-    this.players.set(socketId, {
-      socketId,
-      username,
-      score: 0,
-      lives: this.config.STARTING_LIVES,
-      muncherCol: 0,
-      muncherRow: 0,
-      eaten: new Set(),
-      correctRemaining: 0,
-      roundDone: false,
-      destinationReached: false,
-      eliminated: false,
-      connected: true,
-      lastMoveAt: 0,
-      // analytics bookkeeping, reset every match/round below
-      eatOrder: 0,
-      lastActionAt: 0,
-      firstInputAt: null,
-      firstCorrectAt: null,
-      currentRoundEntry: null,
-      matchLog: { rounds: [] },
-    });
-    if (!this.hostSocketId) this.hostSocketId = socketId;
-    this.scoreRepository.upsertPlayer(username);
-  }
-
-  removePlayer(socketId) {
-    const wasPresent = this.players.delete(socketId);
-    if (this.hostSocketId === socketId) {
-      this.hostSocketId = this.players.keys().next().value || null;
-    }
+// Full removal -- used for an explicit "leave" (Go Home), or once a
+// disconnect's grace period actually expires (see applyLazyStateUpdates).
+function removePlayer(room, playerId) {
+  const wasPresent = !!room.players[playerId];
+  delete room.players[playerId];
+  room.playerOrder = room.playerOrder.filter((id) => id !== playerId);
+  reassignHostIfNeeded(room, playerId);
+  if (wasPresent && room.status === "playing") {
     // A departing player might have been the last one an in-progress round
-    // was waiting on, so re-check whether the round/match can now advance.
-    if (wasPresent && this.status === "playing") {
-      this._maybeAdvanceRound();
-    }
+    // was waiting on, so re-check whether it can now advance.
+    maybeAdvanceRound(room);
   }
+  return wasPresent;
+}
 
-  isEmpty() {
-    return this.players.size === 0;
-  }
-
-  // ---- game lifecycle ----
-
-  startGame(requestingSocketId) {
-    if (requestingSocketId !== this.hostSocketId) throw new Error("Only the host can start the game");
-    if (this.players.size === 0) throw new Error("Need at least one player");
-    this.status = "playing";
-    this.round = 0;
-    this.gameStartedAt = new Date();
-    this._roundFinalizedFor = -1;
-    this._advancing = false;
-    this._clearNextRoundTimer();
-    for (const player of this.players.values()) {
-      player.score = 0;
-      player.lives = this.config.STARTING_LIVES;
-      player.eliminated = false;
-      player.matchLog = { rounds: [] };
-    }
-    this._nextRound();
-  }
-
-  restartGame(requestingSocketId) {
-    if (requestingSocketId !== this.hostSocketId) throw new Error("Only the host can restart the game");
-    this._clearTimer();
-    this._clearNextRoundTimer();
-    this._advancing = false;
-    this.status = "lobby";
-    this.round = 0;
-    this.keyword = null;
-    this.grid = [];
-    this.destination = null;
-    this.eatenCells = new Map();
-    this.firstToFinishSocketId = null;
-    this.gameStartedAt = null;
-    this.roundStartedAt = null;
-    this._roundFinalizedFor = -1;
-    for (const player of this.players.values()) {
-      player.score = 0;
-      player.lives = this.config.STARTING_LIVES;
-      player.eliminated = false;
-      player.roundDone = false;
-      player.destinationReached = false;
-      player.eaten = new Set();
-      player.eatOrder = 0;
-      player.lastActionAt = 0;
-      player.firstInputAt = null;
-      player.firstCorrectAt = null;
-      player.currentRoundEntry = null;
-      player.matchLog = { rounds: [] };
-    }
-  }
-
-  move(socketId, dir) {
-    if (this.status !== "playing") return;
-    const player = this.players.get(socketId);
-    // roundDone is the important guard here: without it, a player who's
-    // already reached the flag could keep moving/munching (and scoring)
-    // during the next-round pause, and every one of those extra moves
-    // would re-trigger _maybeAdvanceRound() -- which used to schedule a
-    // *second* "advance to next round" timer on top of the first one,
-    // each additional move piling on another, all eventually firing back
-    // to back and blowing through several rounds in a fraction of a
-    // second. See _maybeAdvanceRound/_advancing for the belt-and-braces
-    // backstop against that same class of bug.
-    if (!player || player.eliminated || player.roundDone) return;
-    const delta = DIRS[dir];
-    if (!delta) return;
-
-    // Paced movement: ignore moves faster than MOVE_COOLDOWN_MS so munching
-    // never feels like a frantic keyboard-mash race.
-    const now = Date.now();
-    if (now - player.lastMoveAt < this.config.MOVE_COOLDOWN_MS) return;
-    player.lastMoveAt = now;
-
-    player.muncherCol = clamp(player.muncherCol + delta[0], 0, this.config.GRID_COLS - 1);
-    player.muncherRow = clamp(player.muncherRow + delta[1], 0, this.config.GRID_ROWS - 1);
-    this._resolveMunch(player);
-
-    this.emitToRoom("state_update", {
-      players: this._publicPlayers(),
-      sharedEaten: this._publicSharedEaten(),
-      firstToFlag: this._firstToFlagUsername(),
-    });
-    this._maybeAdvanceRound();
-  }
-
-  // ---- internals ----
-
-  // Cells are shared across the whole room: the first player to munch one
-  // resolves it (score/life, and it's removed from the board for
-  // everyone); anyone who steps onto it afterward finds nothing there --
-  // neither a reward nor a penalty. Reaching the flag's *location* always
-  // counts even if someone else already ate the emoji sitting on it, since
-  // the flag is a place to reach, not a thing to eat.
-  _resolveMunch(player) {
-    const key = `${player.muncherCol},${player.muncherRow}`;
-    const cell = this.grid[player.muncherRow * this.config.GRID_COLS + player.muncherCol];
-    if (!cell) return;
-
-    const now = Date.now();
-    const decisionTimeMs = now - (player.lastActionAt || now);
-    const isFirstInput = player.firstInputAt === null;
-    if (isFirstInput) player.firstInputAt = now;
-    player.lastActionAt = now;
-
-    const isDestination = !!this.destination && cell.col === this.destination.col && cell.row === this.destination.row;
-    const alreadyShared = this.eatenCells.has(key);
-
-    if (!alreadyShared) {
-      const correct = this.emojiRepository.isMatch(cell.symbol, this.keyword);
-      this.eatenCells.set(key, { by: player.socketId, symbol: cell.symbol, correct });
-      player.eaten.add(key);
-      player.eatOrder += 1;
-
-      if (correct) {
-        player.score += this.config.POINTS_PER_CORRECT;
-        player.correctRemaining -= 1;
-        if (player.firstCorrectAt === null) player.firstCorrectAt = now;
-      } else {
-        player.lives -= 1;
-        if (player.lives <= 0) player.eliminated = true;
-      }
-
-      if (player.currentRoundEntry) {
-        player.currentRoundEntry.eats.push({
-          emoji: cell.symbol,
-          col: cell.col,
-          row: cell.row,
-          correct,
-          eatOrder: player.eatOrder,
-          timestamp: new Date(now),
-          decisionTimeMs,
-          livesRemaining: player.lives,
-          scoreAfter: player.score,
-        });
-      }
-    } else if (!player.eaten.has(key)) {
-      // Someone else got here first -- record it as visited (for this
-      // player's own analytics/slime trail) without touching score/lives.
-      player.eaten.add(key);
-    }
-
-    if (isDestination && !player.roundDone) {
-      player.destinationReached = true;
-      player.roundDone = true;
-      if (!this.firstToFinishSocketId) {
-        this.firstToFinishSocketId = player.socketId;
-        player.score += this.config.FIRST_TO_FLAG_BONUS;
-      }
-    }
-  }
-
-  _activePlayers() {
-    return [...this.players.values()].filter((p) => p.connected && !p.eliminated);
-  }
-
-  _maybeAdvanceRound() {
-    const active = this._activePlayers();
-    const allEliminated = active.length === 0 && this.players.size > 0;
-    if (allEliminated) {
-      this._endGame();
-      return;
-    }
-    // Belt-and-braces: move()'s roundDone guard should already make it
-    // impossible to reach this with a round-end already in flight, but
-    // removePlayer() also calls this, so the guard stays as a second line
-    // of defense against ever scheduling _nextRound() more than once.
-    if (this._advancing) return;
-    if (active.length > 0 && active.every((p) => p.roundDone)) {
-      this._advancing = true;
-      this._clearTimer();
-      this._advanceAfterDelay();
-    }
-  }
-
-  _advanceAfterDelay() {
-    this._finalizeCurrentRoundLogs();
-    // nextRoundInMs lets the client freeze its timer bar and render an
-    // actual "next round in..." countdown instead of just guessing when
-    // _nextRound() will fire.
-    this.emitToRoom("round_end", {
-      round: this.round,
-      players: this._publicPlayers(),
-      sharedEaten: this._publicSharedEaten(),
-      firstToFlag: this._firstToFlagUsername(),
-      nextRoundInMs: this.config.NEXT_ROUND_PAUSE_MS,
-    });
-    this._clearNextRoundTimer();
-    this.nextRoundTimer = setTimeout(() => {
-      this._advancing = false;
-      this._nextRound();
-    }, this.config.NEXT_ROUND_PAUSE_MS);
-  }
-
-  _firstToFlagUsername() {
-    if (!this.firstToFinishSocketId) return null;
-    const player = this.players.get(this.firstToFinishSocketId);
-    return player ? player.username : null;
-  }
-
-  _publicSharedEaten() {
-    return [...this.eatenCells.entries()].map(([k, v]) => {
-      const [col, row] = k.split(",").map(Number);
-      return { col, row, by: v.by, correct: v.correct };
-    });
-  }
-
-  _nextRound() {
-    this._clearTimer();
-    this._clearNextRoundTimer();
-    this._advancing = false;
-    this.eatenCells = new Map();
-    this.firstToFinishSocketId = null;
-    this.round += 1;
-    if (this.round > this.config.ROUND_COUNT || this._activePlayers().length === 0) {
-      this._endGame();
-      return;
-    }
-
-    const { keyword, grid, correctCount, difficulty, destination } = generateRound(this.emojiRepository, {
-      cols: this.config.GRID_COLS,
-      rows: this.config.GRID_ROWS,
-      minMatches: this.config.MIN_MATCHES_PER_KEYWORD,
-      pathsPerCorner: this.config.PATHS_PER_CORNER,
-    });
-    this.keyword = keyword;
-    this.grid = grid;
-    this.correctCount = correctCount;
-    this.destination = destination ? { col: destination.col, row: destination.row } : null;
-    this.roundStartedAt = new Date();
-
-    const emojiMeta = this._emojiMetaForGrid(grid, keyword);
-
-    let i = 0;
-    for (const player of this.players.values()) {
-      if (player.eliminated) continue;
-      const [sc, sr] = CORNERS[i % CORNERS.length](this.config.GRID_COLS, this.config.GRID_ROWS);
-      player.muncherCol = sc;
-      player.muncherRow = sr;
-      player.eaten = new Set();
-      player.correctRemaining = correctCount;
-      player.roundDone = false;
-      player.destinationReached = false;
-      player.eatOrder = 0;
-      player.lastActionAt = this.roundStartedAt.getTime();
-      player.firstInputAt = null;
-      player.firstCorrectAt = null;
-
-      player.currentRoundEntry = {
-        roundNumber: this.round,
-        keyword,
-        board: grid.map((c) => ({ col: c.col, row: c.row, symbol: c.symbol })),
-        totalCells: this.config.GRID_COLS * this.config.GRID_ROWS,
-        correctCount,
-        destination: this.destination,
-        safeRatio: difficulty.safeRatio,
-        poisonRatio: difficulty.poisonRatio,
-        avgSafeChoicesPerMove: difficulty.avgSafeChoicesPerMove,
-        narrowPathIndicator: difficulty.narrowPathIndicator,
-        safeClusterCount: difficulty.safeClusterCount,
-        pathRepairs: difficulty.pathRepairs,
-        datasetVersion: "qmoji-csv-v1", // no inference/poison-selection model yet; static curated dataset
-        emojiMeta,
-        startedAt: this.roundStartedAt,
-        endedAt: null,
-        durationMs: null,
-        eats: [],
-        correctEaten: 0,
-        wrongEaten: 0,
-        timeToFirstInput: null,
-        timeToCorrectAnswer: null,
-        eliminated: false,
-        destinationReached: false,
-        failureSequence: null,
-        poisonEmojiTriggered: null,
-        poisonTimestamp: null,
-        nearbyInferredNotEaten: [],
-      };
-      player.matchLog.rounds.push(player.currentRoundEntry);
-      i += 1;
-    }
-
-    this.emitToRoom("round_start", this._publicRoundPayload());
-    this.roundTimer = setTimeout(() => {
-      this._advanceAfterDelay();
-    }, this.config.ROUND_TIME_MS);
-  }
-
-  // "Negative Evidence": for each player, which correct emoji sat right next
-  // to a cell they actually visited but never ate. Finalizes each player's
-  // in-memory round entry (no DB write here -- that happens once, in bulk,
-  // at game-over); guarded so it never runs twice for the same round
-  // whether it ends naturally (_advanceAfterDelay) or abruptly (everyone
-  // eliminated mid-round, straight into _endGame).
-  _finalizeCurrentRoundLogs() {
-    if (!this.roundStartedAt || this._roundFinalizedFor === this.round) return;
-    this._roundFinalizedFor = this.round;
-
-    const roundStart = this.roundStartedAt.getTime();
-    const cols = this.config.GRID_COLS;
-    const correctCells = this.grid.filter((c) => this.emojiRepository.isMatch(c.symbol, this.keyword));
-
-    for (const player of this.players.values()) {
-      const entry = player.currentRoundEntry;
-      if (!entry || entry.roundNumber !== this.round) continue;
-
-      let correctEaten = 0;
-      let wrongEaten = 0;
-      for (const key of player.eaten) {
-        const [col, row] = key.split(",").map(Number);
-        const cell = this.grid[row * cols + col];
-        if (cell && this.emojiRepository.isMatch(cell.symbol, this.keyword)) correctEaten += 1;
-        else wrongEaten += 1;
-      }
-
-      const nearbyInferredNotEaten = correctCells
-        .filter((c) => !player.eaten.has(`${c.col},${c.row}`))
-        .filter((c) => NEIGHBOR_OFFSETS.some(([dc, dr]) => player.eaten.has(`${c.col + dc},${c.row + dr}`)))
-        .map((c) => ({ symbol: c.symbol, col: c.col, row: c.row }));
-
-      const endedAt = new Date();
-      entry.endedAt = endedAt;
-      entry.durationMs = endedAt.getTime() - roundStart;
-      entry.correctEaten = correctEaten;
-      entry.wrongEaten = wrongEaten;
-      entry.timeToFirstInput = player.firstInputAt !== null ? player.firstInputAt - roundStart : null;
-      entry.timeToCorrectAnswer = player.firstCorrectAt !== null ? player.firstCorrectAt - roundStart : null;
-      entry.eliminated = player.eliminated;
-      entry.destinationReached = player.destinationReached;
-      entry.failureSequence = player.eliminated ? player.eatOrder : null;
-      entry.nearbyInferredNotEaten = nearbyInferredNotEaten;
-
-      // Elimination stops the player from moving again (see move()), so the
-      // last logged munch is always exactly the poison emoji that ended them.
-      if (player.eliminated) {
-        const lastEat = entry.eats[entry.eats.length - 1];
-        if (lastEat && !lastEat.correct) {
-          entry.poisonEmojiTriggered = lastEat.emoji;
-          entry.poisonTimestamp = lastEat.timestamp;
-        }
-      }
-    }
-  }
-
-  _emojiMetaForGrid(grid, keyword) {
-    const seen = new Map();
-    for (const cell of grid) {
-      if (!seen.has(cell.symbol)) {
-        seen.set(cell.symbol, {
-          symbol: cell.symbol,
-          // Every keyword-emoji pair in the current dataset came directly
-          // from the user-submitted CSV, so there is no "inferred" layer
-          // yet -- this flag is a placeholder for when/if one is added.
-          confirmedOrInferred: "confirmed",
-          poisonStatus: this.emojiRepository.isMatch(cell.symbol, keyword) ? "safe" : "poison",
-        });
-      }
-    }
-    return [...seen.values()];
-  }
-
-  async _endGame() {
-    this._clearTimer();
-    this._clearNextRoundTimer();
-    this._finalizeCurrentRoundLogs();
-    this.status = "gameOver";
-
-    const gameEndedAt = new Date();
-    const totalDurationMs = this.gameStartedAt ? gameEndedAt.getTime() - this.gameStartedAt.getTime() : null;
-    const allUsernames = [...this.players.values()].map((p) => p.username);
-
-    for (const player of this.players.values()) {
-      await this.scoreRepository.recordMatchResult(player.username, player.score);
-
-      this.analyticsRepository.recordGameSession({
-        username: player.username,
-        roomCode: this.code,
-        game: "Emoji Munchers",
-        language: "en", // only language currently playable; revisit once localized
-        gameStartedAt: this.gameStartedAt,
-        gameEndedAt,
-        totalDurationMs,
-        rounds: player.matchLog.rounds,
-        finalScore: player.score,
-        finalLives: player.lives,
-        eliminated: player.eliminated,
-        otherPlayers: allUsernames.filter((u) => u !== player.username),
-      });
-    }
-
-    const leaderboard = await this.scoreRepository.getLeaderboard(10);
-    this.emitToRoom("game_over", {
-      players: this._publicPlayers(),
-      leaderboard,
-    });
-  }
-
-  _clearTimer() {
-    if (this.roundTimer) {
-      clearTimeout(this.roundTimer);
-      this.roundTimer = null;
-    }
-  }
-
-  _clearNextRoundTimer() {
-    if (this.nextRoundTimer) {
-      clearTimeout(this.nextRoundTimer);
-      this.nextRoundTimer = null;
-    }
-  }
-
-  // ---- payload shaping (never leak which cells are correct) ----
-
-  _publicPlayers() {
-    return [...this.players.entries()].map(([socketId, p]) => ({
-      socketId,
-      username: p.username,
-      score: p.score,
-      lives: p.lives,
-      muncherCol: p.muncherCol,
-      muncherRow: p.muncherRow,
-      eatenCells: [...p.eaten],
-      roundDone: p.roundDone,
-      eliminated: p.eliminated,
-      connected: p.connected,
-      isHost: socketId === this.hostSocketId,
-    }));
-  }
-
-  getPlayersSnapshot() {
-    return this._publicPlayers();
-  }
-
-  toLobbyPayload() {
-    return {
-      code: this.code,
-      status: this.status,
-      hostSocketId: this.hostSocketId,
-      players: [...this.players.entries()].map(([socketId, p]) => ({
-        socketId,
-        username: p.username,
-        connected: p.connected,
-        isHost: socketId === this.hostSocketId,
-      })),
-    };
-  }
-
-  _publicRoundPayload() {
-    return {
-      round: this.round,
-      totalRounds: this.config.ROUND_COUNT,
-      keyword: this.keyword,
-      grid: this.grid.map((c) => ({ col: c.col, row: c.row, symbol: c.symbol })),
-      destination: this.destination,
-      cols: this.config.GRID_COLS,
-      rows: this.config.GRID_ROWS,
-      timeLimitMs: this.config.ROUND_TIME_MS,
-      startingLives: this.config.STARTING_LIVES,
-      players: this._publicPlayers(),
-      sharedEaten: this._publicSharedEaten(),
-      firstToFlag: this._firstToFlagUsername(),
-    };
+// Sent every few seconds by a connected client -- there's no persistent
+// socket left for the server to notice a disconnect with, so presence is
+// tracked this way instead. Actual staleness detection happens lazily in
+// applyLazyStateUpdates on the next room load, not here.
+function heartbeat(room, playerId) {
+  const player = room.players[playerId];
+  if (!player) throw new Error("You are not in this room.");
+  player.lastSeenAt = Date.now();
+  if (!player.connected) {
+    player.connected = true;
+    player.disconnectedAt = null;
   }
 }
 
-module.exports = { GameRoom };
+// ---- game lifecycle ----
+
+function startGame(room, requesterId) {
+  if (requesterId !== room.hostId) throw new Error("Only the host can start the game");
+  if (room.playerOrder.length === 0) throw new Error("Need at least one player");
+  room.status = "playing";
+  room.round = 0;
+  room.gameStartedAt = Date.now();
+  room.gameEndedAt = null;
+  room.roundFinalizedFor = -1;
+  room.analyticsSaved = false;
+  for (const id of room.playerOrder) {
+    const player = room.players[id];
+    player.score = 0;
+    player.lives = config.STARTING_LIVES;
+    player.eliminated = false;
+    player.matchLog = { rounds: [] };
+  }
+  nextRound(room);
+}
+
+function restartGame(room, requesterId) {
+  if (requesterId !== room.hostId) throw new Error("Only the host can restart the game");
+  room.status = "lobby";
+  room.round = 0;
+  room.keyword = null;
+  room.grid = [];
+  room.destination = null;
+  room.eatenCells = {};
+  room.firstToFinishPlayerId = null;
+  room.gameStartedAt = null;
+  room.gameEndedAt = null;
+  room.roundStartedAt = null;
+  room.roundEndsAt = null;
+  room.nextRoundAt = null;
+  room.roundFinalizedFor = -1;
+  room.analyticsSaved = false;
+  for (const id of room.playerOrder) {
+    const player = room.players[id];
+    player.score = 0;
+    player.lives = config.STARTING_LIVES;
+    player.eliminated = false;
+    player.roundDone = false;
+    player.destinationReached = false;
+    player.eaten = [];
+    player.eatOrder = 0;
+    player.lastActionAt = 0;
+    player.firstInputAt = null;
+    player.firstCorrectAt = null;
+    player.currentRoundEntry = null;
+    player.matchLog = { rounds: [] };
+  }
+}
+
+function move(room, playerId, dir) {
+  if (room.status !== "playing") return;
+  const player = room.players[playerId];
+  // roundDone is the important guard here: without it, a player who's
+  // already reached the flag could keep moving/munching (and scoring)
+  // during the next-round pause.
+  if (!player || player.eliminated || player.roundDone) return;
+  const delta = DIRS[dir];
+  if (!delta) return;
+
+  // Paced movement: ignore moves faster than MOVE_COOLDOWN_MS so munching
+  // never feels like a frantic keyboard-mash race.
+  const now = Date.now();
+  if (now - player.lastMoveAt < config.MOVE_COOLDOWN_MS) return;
+  player.lastMoveAt = now;
+
+  player.muncherCol = clamp(player.muncherCol + delta[0], 0, config.GRID_COLS - 1);
+  player.muncherRow = clamp(player.muncherRow + delta[1], 0, config.GRID_ROWS - 1);
+  resolveMunch(room, player);
+  maybeAdvanceRound(room);
+}
+
+// ---- internals ----
+
+// Cells are shared across the whole room: the first player to munch one
+// resolves it (score/life, and it's removed from the board for everyone);
+// anyone who steps onto it afterward finds nothing there -- neither a
+// reward nor a penalty. Reaching the flag's *location* always counts even
+// if someone else already ate the emoji sitting on it, since the flag is a
+// place to reach, not a thing to eat.
+function resolveMunch(room, player) {
+  const key = `${player.muncherCol},${player.muncherRow}`;
+  const cell = room.grid[player.muncherRow * config.GRID_COLS + player.muncherCol];
+  if (!cell) return;
+
+  const now = Date.now();
+  const decisionTimeMs = now - (player.lastActionAt || now);
+  const isFirstInput = player.firstInputAt === null;
+  if (isFirstInput) player.firstInputAt = now;
+  player.lastActionAt = now;
+
+  const isDestination = !!room.destination && cell.col === room.destination.col && cell.row === room.destination.row;
+  const alreadyShared = Object.prototype.hasOwnProperty.call(room.eatenCells, key);
+
+  if (!alreadyShared) {
+    const correct = emojiRepository.isMatch(cell.symbol, room.keyword);
+    room.eatenCells[key] = { by: player.id, symbol: cell.symbol, correct };
+    player.eaten.push(key);
+    player.eatOrder += 1;
+
+    if (correct) {
+      player.score += config.POINTS_PER_CORRECT;
+      player.correctRemaining -= 1;
+      if (player.firstCorrectAt === null) player.firstCorrectAt = now;
+    } else {
+      player.lives -= 1;
+      if (player.lives <= 0) player.eliminated = true;
+    }
+
+    if (player.currentRoundEntry) {
+      player.currentRoundEntry.eats.push({
+        emoji: cell.symbol,
+        col: cell.col,
+        row: cell.row,
+        correct,
+        eatOrder: player.eatOrder,
+        timestamp: new Date(now),
+        decisionTimeMs,
+        livesRemaining: player.lives,
+        scoreAfter: player.score,
+      });
+    }
+  } else if (!player.eaten.includes(key)) {
+    // Someone else got here first -- record it as visited (for this
+    // player's own analytics/slime trail) without touching score/lives.
+    player.eaten.push(key);
+  }
+
+  if (isDestination && !player.roundDone) {
+    player.destinationReached = true;
+    player.roundDone = true;
+    if (!room.firstToFinishPlayerId) {
+      room.firstToFinishPlayerId = player.id;
+      player.score += config.FIRST_TO_FLAG_BONUS;
+    }
+  }
+}
+
+function activePlayers(room) {
+  return room.playerOrder.map((id) => room.players[id]).filter((p) => p && p.connected && !p.eliminated);
+}
+
+// Returns true if this call changed round/game state (used by the lazy
+// heartbeat-staleness path to know whether the room needs saving).
+function maybeAdvanceRound(room) {
+  const active = activePlayers(room);
+  const allEliminated = active.length === 0 && room.playerOrder.length > 0;
+  if (allEliminated) {
+    endGame(room);
+    return true;
+  }
+  if (active.length > 0 && active.every((p) => p.roundDone)) {
+    advanceAfterDelay(room);
+    return true;
+  }
+  return false;
+}
+
+function advanceAfterDelay(room) {
+  finalizeCurrentRoundLogs(room);
+  room.roundEndsAt = null;
+  room.status = "roundEnd";
+  room.nextRoundAt = Date.now() + config.NEXT_ROUND_PAUSE_MS;
+}
+
+function emojiMetaForGrid(grid, keyword) {
+  const seen = new Map();
+  for (const cell of grid) {
+    if (!seen.has(cell.symbol)) {
+      seen.set(cell.symbol, {
+        symbol: cell.symbol,
+        // Every keyword-emoji pair in the current dataset came directly
+        // from the user-submitted CSV, so there is no "inferred" layer
+        // yet -- this flag is a placeholder for when/if one is added.
+        confirmedOrInferred: "confirmed",
+        poisonStatus: emojiRepository.isMatch(cell.symbol, keyword) ? "safe" : "poison",
+      });
+    }
+  }
+  return [...seen.values()];
+}
+
+function nextRound(room) {
+  room.nextRoundAt = null;
+  room.eatenCells = {};
+  room.firstToFinishPlayerId = null;
+  room.round += 1;
+
+  const active = activePlayers(room);
+  if (room.round > config.ROUND_COUNT || active.length === 0) {
+    endGame(room);
+    return;
+  }
+
+  const { keyword, grid, correctCount, difficulty, destination } = generateRound(emojiRepository, {
+    cols: config.GRID_COLS,
+    rows: config.GRID_ROWS,
+    minMatches: config.MIN_MATCHES_PER_KEYWORD,
+    pathsPerCorner: config.PATHS_PER_CORNER,
+  });
+  room.keyword = keyword;
+  room.grid = grid;
+  room.correctCount = correctCount;
+  room.destination = destination ? { col: destination.col, row: destination.row } : null;
+  room.roundStartedAt = Date.now();
+  room.roundEndsAt = room.roundStartedAt + config.ROUND_TIME_MS;
+  room.status = "playing";
+
+  const emojiMeta = emojiMetaForGrid(grid, keyword);
+
+  let i = 0;
+  for (const id of room.playerOrder) {
+    const player = room.players[id];
+    if (!player || player.eliminated) continue;
+    const [sc, sr] = CORNERS[i % CORNERS.length](config.GRID_COLS, config.GRID_ROWS);
+    player.muncherCol = sc;
+    player.muncherRow = sr;
+    player.eaten = [];
+    player.correctRemaining = correctCount;
+    player.roundDone = false;
+    player.destinationReached = false;
+    player.eatOrder = 0;
+    player.lastActionAt = room.roundStartedAt;
+    player.firstInputAt = null;
+    player.firstCorrectAt = null;
+
+    player.currentRoundEntry = {
+      roundNumber: room.round,
+      keyword,
+      board: grid.map((c) => ({ col: c.col, row: c.row, symbol: c.symbol })),
+      totalCells: config.GRID_COLS * config.GRID_ROWS,
+      correctCount,
+      destination: room.destination,
+      safeRatio: difficulty.safeRatio,
+      poisonRatio: difficulty.poisonRatio,
+      avgSafeChoicesPerMove: difficulty.avgSafeChoicesPerMove,
+      narrowPathIndicator: difficulty.narrowPathIndicator,
+      safeClusterCount: difficulty.safeClusterCount,
+      pathRepairs: difficulty.pathRepairs,
+      datasetVersion: "qmoji-csv-v1", // no inference/poison-selection model yet; static curated dataset
+      emojiMeta,
+      startedAt: new Date(room.roundStartedAt),
+      endedAt: null,
+      durationMs: null,
+      eats: [],
+      correctEaten: 0,
+      wrongEaten: 0,
+      timeToFirstInput: null,
+      timeToCorrectAnswer: null,
+      eliminated: false,
+      destinationReached: false,
+      failureSequence: null,
+      poisonEmojiTriggered: null,
+      poisonTimestamp: null,
+      nearbyInferredNotEaten: [],
+    };
+    player.matchLog.rounds.push(player.currentRoundEntry);
+    i += 1;
+  }
+}
+
+// "Negative Evidence": for each player, which correct emoji sat right next
+// to a cell they actually visited but never ate. Finalizes each player's
+// in-memory round entry (no DB write here -- that's the app layer's job,
+// once per completed game, guarded by room.analyticsSaved); guarded so it
+// never runs twice for the same round whether it ends naturally
+// (advanceAfterDelay) or abruptly (everyone eliminated mid-round, straight
+// into endGame).
+function finalizeCurrentRoundLogs(room) {
+  if (!room.roundStartedAt || room.roundFinalizedFor === room.round) return;
+  room.roundFinalizedFor = room.round;
+
+  const roundStart = room.roundStartedAt;
+  const cols = config.GRID_COLS;
+  const correctCells = room.grid.filter((c) => emojiRepository.isMatch(c.symbol, room.keyword));
+
+  for (const id of room.playerOrder) {
+    const player = room.players[id];
+    if (!player) continue;
+    const entry = player.currentRoundEntry;
+    if (!entry || entry.roundNumber !== room.round) continue;
+
+    let correctEaten = 0;
+    let wrongEaten = 0;
+    for (const key of player.eaten) {
+      const [col, row] = key.split(",").map(Number);
+      const cell = room.grid[row * cols + col];
+      if (cell && emojiRepository.isMatch(cell.symbol, room.keyword)) correctEaten += 1;
+      else wrongEaten += 1;
+    }
+
+    const nearbyInferredNotEaten = correctCells
+      .filter((c) => !player.eaten.includes(`${c.col},${c.row}`))
+      .filter((c) => NEIGHBOR_OFFSETS.some(([dc, dr]) => player.eaten.includes(`${c.col + dc},${c.row + dr}`)))
+      .map((c) => ({ symbol: c.symbol, col: c.col, row: c.row }));
+
+    const endedAt = Date.now();
+    entry.endedAt = new Date(endedAt);
+    entry.durationMs = endedAt - roundStart;
+    entry.correctEaten = correctEaten;
+    entry.wrongEaten = wrongEaten;
+    entry.timeToFirstInput = player.firstInputAt !== null ? player.firstInputAt - roundStart : null;
+    entry.timeToCorrectAnswer = player.firstCorrectAt !== null ? player.firstCorrectAt - roundStart : null;
+    entry.eliminated = player.eliminated;
+    entry.destinationReached = player.destinationReached;
+    entry.failureSequence = player.eliminated ? player.eatOrder : null;
+    entry.nearbyInferredNotEaten = nearbyInferredNotEaten;
+
+    // Elimination stops the player from moving again (see move()), so the
+    // last logged munch is always exactly the poison emoji that ended them.
+    if (player.eliminated) {
+      const lastEat = entry.eats[entry.eats.length - 1];
+      if (lastEat && !lastEat.correct) {
+        entry.poisonEmojiTriggered = lastEat.emoji;
+        entry.poisonTimestamp = lastEat.timestamp;
+      }
+    }
+  }
+}
+
+function endGame(room) {
+  finalizeCurrentRoundLogs(room);
+  room.status = "gameOver";
+  room.roundEndsAt = null;
+  room.nextRoundAt = null;
+  room.gameEndedAt = Date.now();
+}
+
+// ---- time-driven state resolution ----
+//
+// Round timeouts and stale disconnects used to be resolved by live
+// setTimeout handles kept in the old GameRoom instance's memory -- those
+// can't survive across serverless invocations, so every room load instead
+// "catches up" any state that should have already changed by wall-clock
+// time. Mutates `room` in place; returns true if anything changed, so the
+// caller (LobbyManager's loadRoom()) knows whether to persist it.
+function applyLazyStateUpdates(room) {
+  let changed = false;
+  const now = Date.now();
+
+  if (room.status === "playing" && room.roundEndsAt && now >= room.roundEndsAt) {
+    advanceAfterDelay(room);
+    changed = true;
+  } else if (room.status === "roundEnd" && room.nextRoundAt && now >= room.nextRoundAt) {
+    nextRound(room);
+    changed = true;
+  }
+
+  for (const id of room.playerOrder) {
+    const player = room.players[id];
+    if (player && player.connected && now - (player.lastSeenAt || 0) > HEARTBEAT_TIMEOUT_MS) {
+      player.connected = false;
+      player.disconnectedAt = now;
+      reassignHostIfNeeded(room, id);
+      changed = true;
+      if (room.status === "playing" && maybeAdvanceRound(room)) changed = true;
+    }
+  }
+
+  const stale = room.playerOrder.filter((id) => {
+    const player = room.players[id];
+    return player && !player.connected && player.disconnectedAt && now - player.disconnectedAt > DISCONNECT_GRACE_MS;
+  });
+  if (stale.length) {
+    for (const id of stale) {
+      reassignHostIfNeeded(room, id);
+      delete room.players[id];
+    }
+    room.playerOrder = room.playerOrder.filter((id) => !stale.includes(id));
+    changed = true;
+    if (room.status === "playing" && maybeAdvanceRound(room)) changed = true;
+  }
+
+  return changed;
+}
+
+// ---- payload shaping (never leak which cells are correct) ----
+
+function publicPlayers(room) {
+  return room.playerOrder
+    .map((id) => {
+      const p = room.players[id];
+      if (!p) return null;
+      return {
+        playerId: id,
+        username: p.username,
+        score: p.score,
+        lives: p.lives,
+        muncherCol: p.muncherCol,
+        muncherRow: p.muncherRow,
+        eatenCells: p.eaten,
+        roundDone: p.roundDone,
+        eliminated: p.eliminated,
+        connected: p.connected,
+        isHost: id === room.hostId,
+      };
+    })
+    .filter(Boolean);
+}
+
+function publicSharedEaten(room) {
+  return Object.entries(room.eatenCells).map(([k, v]) => {
+    const [col, row] = k.split(",").map(Number);
+    return { col, row, by: v.by, correct: v.correct };
+  });
+}
+
+function firstToFlagUsername(room) {
+  if (!room.firstToFinishPlayerId) return null;
+  const player = room.players[room.firstToFinishPlayerId];
+  return player ? player.username : null;
+}
+
+// Single envelope covering every screen (lobby, playing, roundEnd,
+// gameOver) -- polling always returns "the current full state" rather than
+// the several differently-shaped event payloads Socket.IO used to emit.
+function toClientView(room) {
+  return {
+    code: room.code,
+    status: room.status,
+    hostId: room.hostId,
+    round: room.round,
+    totalRounds: config.ROUND_COUNT,
+    keyword: room.keyword,
+    grid: room.grid.map((c) => ({ col: c.col, row: c.row, symbol: c.symbol })),
+    destination: room.destination,
+    cols: config.GRID_COLS,
+    rows: config.GRID_ROWS,
+    timeLimitMs: config.ROUND_TIME_MS,
+    startingLives: config.STARTING_LIVES,
+    roundEndsAt: room.roundEndsAt,
+    nextRoundAt: room.nextRoundAt,
+    players: publicPlayers(room),
+    sharedEaten: publicSharedEaten(room),
+    firstToFlag: firstToFlagUsername(room),
+  };
+}
+
+module.exports = {
+  createRoom,
+  isEmpty,
+  addPlayer,
+  removePlayer,
+  heartbeat,
+  startGame,
+  restartGame,
+  move,
+  applyLazyStateUpdates,
+  toClientView,
+};
