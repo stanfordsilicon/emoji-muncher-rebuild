@@ -102,7 +102,7 @@
 
   function enterRoom(view) {
     currentRoomCode = view.code;
-    applySnapshotIfFresh(view, nextSeq());
+    applySnapshotIfFresh(view);
     startPolling();
     startHeartbeat();
   }
@@ -283,10 +283,9 @@
   const startGameBtn = document.getElementById("startGameBtn");
 
   startGameBtn.addEventListener("click", async () => {
-    const seq = nextSeq();
     const res = await api("start-game", {});
     if (!res.ok) return showError(waitingHint, res.error);
-    applySnapshotIfFresh(res.room, seq);
+    applySnapshotIfFresh(res.room);
   });
 
   function renderWaitingRoom(view) {
@@ -686,9 +685,8 @@
   const overHint = document.getElementById("overHint");
 
   playAgainBtn.addEventListener("click", async () => {
-    const seq = nextSeq();
     const res = await api("restart-game", {});
-    if (res.ok) applySnapshotIfFresh(res.room, seq);
+    if (res.ok) applySnapshotIfFresh(res.room);
   });
 
   function loadAllTimeLeaderboard() {
@@ -728,17 +726,25 @@
   // response, carrying the pre-move position. Without a guard, applying it
   // snaps the muncher back a step right after it moved, then forward again
   // on the next poll -- which reads as "the arrow keys are laggy," not as
-  // the harmless race it actually is. requestSeq is stamped at the moment
-  // each request is *sent*; whichever response's stamp is highest wins,
-  // regardless of which one's network round-trip happens to finish last.
-  let requestSeq = 0;
-  let appliedSeq = 0;
-  function nextSeq() {
-    return ++requestSeq;
-  }
-  function applySnapshotIfFresh(view, seq) {
-    if (seq < appliedSeq) return;
-    appliedSeq = seq;
+  // the harmless race it actually is.
+  //
+  // This used to be guarded by a client-side counter stamped at request
+  // *send* time, on the assumption that whichever request was sent last
+  // would also be the one to arrive with the freshest data. That holds on
+  // a near-zero-latency localhost, but not against real network jitter: a
+  // poll and a move fired moments apart can still reach the server, and
+  // get processed, in a different order than they were sent -- so the
+  // "later" request's response could actually carry *older* state, and the
+  // guard would then refuse every subsequent (genuinely fresher) response
+  // forever, since its own send-order stamp could never be lower again.
+  // That's the actual "gets stuck after a while" bug. version comes from
+  // the server instead (GameRoom.js, bumped once per store.saveRoom() call)
+  // -- it reflects the true order mutations happened in, regardless of
+  // which request happened to arrive first.
+  let appliedVersion = -1;
+  function applySnapshotIfFresh(view) {
+    if (typeof view.version === "number" && view.version < appliedVersion) return;
+    appliedVersion = view.version;
     applyRoomSnapshot(view);
   }
 
@@ -789,9 +795,8 @@
     const now = Date.now();
     if (now - lastMoveSentAt < CLIENT_MOVE_THROTTLE_MS) return;
     lastMoveSentAt = now;
-    const seq = nextSeq();
     api("move", { dir }).then((res) => {
-      if (res.ok) applySnapshotIfFresh(res.room, seq);
+      if (res.ok) applySnapshotIfFresh(res.room);
     });
   }
 
@@ -826,12 +831,11 @@
   async function pollRoom() {
     if (!currentRoomCode) return;
     let nextStatus = lastRoomView ? lastRoomView.status : "lobby";
-    const seq = nextSeq();
     try {
       const res = await fetch(`/api/room?code=${encodeURIComponent(currentRoomCode)}`);
       const data = await res.json();
       if (data.ok && data.room) {
-        applySnapshotIfFresh(data.room, seq);
+        applySnapshotIfFresh(data.room);
         nextStatus = data.room.status;
       }
     } catch (e) {

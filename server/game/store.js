@@ -30,6 +30,7 @@ class InMemoryRoomStore {
   }
 
   async saveRoom(room) {
+    room.version = (room.version || 0) + 1;
     this._rooms.set(room.code, room);
     return room;
   }
@@ -64,6 +65,7 @@ class MongoRoomStore {
   }
 
   async saveRoom(room) {
+    room.version = (room.version || 0) + 1;
     const col = await this._col();
     await col.updateOne({ _id: room.code }, { $set: { ...room, updatedAt: new Date() } }, { upsert: true });
     return room;

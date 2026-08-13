@@ -78,6 +78,16 @@ function createRoom(code) {
     nextRoundAt: null, // replaces the old live nextRoundTimer
     roundFinalizedFor: -1, // round number already finalized, guards double-finalization
     analyticsSaved: false, // guards double-writing score/analytics on game over
+    // Bumped on every store.saveRoom() call (see server/game/store.js) --
+    // the client compares this, not request-send order, to decide whether
+    // an incoming response is fresher than what it already has. Request
+    // send order looks like a reasonable proxy for freshness but isn't one:
+    // under real network jitter (negligible on localhost, routine on a
+    // real deployment) a poll and a move fired moments apart can still
+    // reach the server, and get processed, out of send order. version is
+    // assigned by the server at the moment each mutation actually happens,
+    // so it reflects true freshness regardless of network reordering.
+    version: 0,
     createdAt: Date.now(),
   };
 }
@@ -592,6 +602,7 @@ function firstToFlagUsername(room) {
 function toClientView(room) {
   return {
     code: room.code,
+    version: room.version,
     status: room.status,
     hostId: room.hostId,
     round: room.round,
