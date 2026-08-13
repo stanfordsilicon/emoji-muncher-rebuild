@@ -16,6 +16,16 @@
 // with its own empty Map, so DATA_BACKEND=mongo is required there: room
 // state has to live somewhere shared, reusing the same connection already
 // used for score/analytics data.
+//
+// saveRoom(room, expectedVersion) is optimistic-concurrency-aware: pass the
+// version the room was at when you read it, and the save only succeeds if
+// nothing else has saved a newer version since -- returning null instead of
+// silently overwriting a concurrent change. This is what actually protects
+// against two requests for the *same* room (e.g. two /api/move calls fired
+// less than one round-trip apart) racing each other -- an in-process lock
+// can't do that on Vercel, where the two requests can land on two entirely
+// different serverless instances that know nothing about each other. Pass
+// no expectedVersion for an unconditional save (new rooms only).
 
 const { DATA_BACKEND } = require("../data");
 const { getMongoDb } = require("../data/mongoClient");
@@ -29,7 +39,11 @@ class InMemoryRoomStore {
     return this._rooms.get(code) || null;
   }
 
-  async saveRoom(room) {
+  async saveRoom(room, expectedVersion) {
+    if (expectedVersion !== undefined) {
+      const current = this._rooms.get(room.code);
+      if (!current || current.version !== expectedVersion) return null;
+    }
     room.version = (room.version || 0) + 1;
     this._rooms.set(room.code, room);
     return room;
@@ -64,10 +78,17 @@ class MongoRoomStore {
     return room;
   }
 
-  async saveRoom(room) {
-    room.version = (room.version || 0) + 1;
+  async saveRoom(room, expectedVersion) {
     const col = await this._col();
-    await col.updateOne({ _id: room.code }, { $set: { ...room, updatedAt: new Date() } }, { upsert: true });
+    const newVersion = (room.version || 0) + 1;
+    const filter = expectedVersion === undefined ? { _id: room.code } : { _id: room.code, version: expectedVersion };
+    const result = await col.updateOne(
+      filter,
+      { $set: { ...room, version: newVersion, updatedAt: new Date() } },
+      { upsert: expectedVersion === undefined }
+    );
+    if (expectedVersion !== undefined && result.matchedCount === 0) return null;
+    room.version = newVersion;
     return room;
   }
 
