@@ -72,11 +72,27 @@ async function loadRoom(rawCode) {
 // mutateFn may throw (e.g. "Only the host can start the game") -- that
 // propagates immediately, uncaught here, since it's a validation failure
 // the caller needs to see, not a concurrency conflict to retry past.
+//
+// A `store.getRoom` miss on the *first* attempt is retried here too, not
+// treated as an instant "Room not found" -- on Vercel a cold serverless
+// instance opens a brand-new Mongo connection per store.js's comment, and a
+// findOne on that fresh connection can transiently miss a document that
+// genuinely exists (confirmed live: a run of moves each got "Room not
+// found" for ~5 requests in a row, then the very next read found the room
+// again with its version continuing right where it left off -- proving the
+// room was never actually gone). Treating that identically to "the caller
+// raced someone else's save" and looping is what actually fixes it, since
+// the alternative -- reporting failure to the client -- silently drops a
+// keypress with no feedback (see public/client.js's sendMove: it no-ops on
+// `!res.ok`), which is exactly what "have to hit the arrow multiple times"
+// looks like from the player's side.
 async function mutateRoom(rawCode, mutateFn) {
   const code = String(rawCode || "").toUpperCase();
+  let everFoundRoom = false;
   for (let attempt = 0; attempt < MAX_MUTATE_RETRIES; attempt++) {
     const room = await store.getRoom(code);
-    if (!room) return null;
+    if (!room) continue;
+    everFoundRoom = true;
     GameRoom.applyLazyStateUpdates(room);
     if (GameRoom.isEmpty(room)) {
       await store.deleteRoom(code);
@@ -98,6 +114,9 @@ async function mutateRoom(rawCode, mutateFn) {
     // transition) saved first -- loop and retry the mutation against
     // whatever the room actually looks like now.
   }
+  // Never found the room on any attempt -> genuinely doesn't exist (or was
+  // deleted). Found it but kept losing the save race -> actually busy.
+  if (!everFoundRoom) return null;
   throw new Error("Room is busy — try again.");
 }
 
