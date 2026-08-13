@@ -227,8 +227,9 @@ app.post("/api/restart-game", async (req, res) => {
 app.post("/api/move", async (req, res) => {
   try {
     const { code, playerId, dir } = req.body || {};
+    const __t0 = Date.now();
     const room = await lobbyManager.move(normCode(code), normId(playerId), dir);
-    if (!room) return res.json({ ok: false, error: "Room not found." });
+    if (!room) return res.json({ ok: false, error: `Room not found. [diag retry-v2 elapsedMs=${Date.now() - __t0}]` });
     maybeSaveAnalytics(room);
     res.json({ ok: true, room: GameRoom.toClientView(room) });
   } catch (err) {
