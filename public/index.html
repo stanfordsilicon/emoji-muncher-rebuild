@@ -4,14 +4,25 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Emoji Munchers</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
+
+<div class="crt-overlay" aria-hidden="true"></div>
+<div class="vignette" aria-hidden="true"></div>
 
 <button id="backToLaunchpadBtn" class="back-to-launchpad" type="button" title="Return to launch pad">
   ← RETURN TO LAUNCH PAD
 </button>
 <button id="muteBtn" class="sound-toggle icon-btn" type="button" title="Mute sound" aria-label="Mute sound">🔊</button>
+
+<div class="loading-screen" id="loadingScreen" aria-hidden="true">
+  <p class="loading-text">LOADING<span class="loading-dots">...</span></p>
+  <div class="loading-bar"><div class="loading-bar-fill" id="loadingBarFill"></div></div>
+</div>
 
 <!-- ============ LOBBY SCREEN ============ -->
 <section id="screen-lobby" class="screen">
