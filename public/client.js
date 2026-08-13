@@ -784,11 +784,13 @@
     return !!(me && me.roundDone);
   }
 
-  // Mirrors (and is deliberately a hair above) the server's own
-  // MOVE_COOLDOWN_MS -- purely a client-side request-rate throttle so
-  // holding a key down doesn't fire a POST for every OS key-repeat tick;
-  // the server remains the sole authority on whether a move is accepted.
-  const CLIENT_MOVE_THROTTLE_MS = 180;
+  // Purely a client-side request-rate throttle so holding a key down
+  // doesn't fire a POST for every OS key-repeat tick (which can be much
+  // faster than any real human tap) -- the server remains the sole
+  // authority on whether a move is accepted, and no longer paces moves on
+  // its own (MOVE_COOLDOWN_MS defaults to 0), so this stays well under any
+  // real tap cadence rather than mirroring a server-side cooldown.
+  const CLIENT_MOVE_THROTTLE_MS = 40;
   let lastMoveSentAt = 0;
   function sendMove(dir) {
     if (amRoundDone()) return;

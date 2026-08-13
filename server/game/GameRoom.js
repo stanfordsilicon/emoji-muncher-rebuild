@@ -243,8 +243,11 @@ function move(room, playerId, dir) {
   const delta = DIRS[dir];
   if (!delta) return;
 
-  // Paced movement: ignore moves faster than MOVE_COOLDOWN_MS so munching
-  // never feels like a frantic keyboard-mash race.
+  // Optional pacing knob (MOVE_COOLDOWN_MS, 0/off by default): ignores moves
+  // faster than the configured gap. Left at 0 so every accepted keypress
+  // moves immediately -- a nonzero value here was making legitimate rapid
+  // taps get silently dropped with no feedback, which read as the game
+  // needing multiple presses to register one step.
   const now = Date.now();
   if (now - player.lastMoveAt < config.MOVE_COOLDOWN_MS) return;
   player.lastMoveAt = now;
