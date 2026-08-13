@@ -1,6 +1,11 @@
 (function () {
   "use strict";
 
+  // Static (non-templated) UI text is data-i18n-driven -- see public/i18n.js.
+  // Anything with dynamic content (a score, a room code) is set directly
+  // below via t() instead, since data-i18n has no way to carry variables.
+  applyStaticTranslations();
+
   // No more persistent Socket.IO connection -- every action is a plain HTTP
   // request, and room updates arrive via polling instead of a push
   // broadcast. See server/app.js's top comment for why (Vercel serverless
@@ -39,7 +44,7 @@
       });
       return await res.json();
     } catch (e) {
-      return { ok: false, error: "Connection error — please try again." };
+      return { ok: false, error: t("connection_error") };
     }
   }
 
@@ -96,7 +101,7 @@
 
   function getUsername() {
     const name = usernameInput.value.trim();
-    if (!name) showError(lobbyError, "Enter a username first.");
+    if (!name) showError(lobbyError, t("username_required_error"));
     return name;
   }
 
@@ -119,7 +124,7 @@
     const username = getUsername();
     if (!username) return;
     const code = roomCodeInput.value.trim().toUpperCase();
-    if (!code) return showError(lobbyError, "Enter a room code.");
+    if (!code) return showError(lobbyError, t("room_code_required_error"));
     const res = await api("join-room", { username, code, token: sessionToken });
     if (!res.ok) return showError(lobbyError, res.error);
     enterRoom(res.room);
@@ -160,7 +165,7 @@
   function applySignedIn(name) {
     accountSignedOut.classList.add("hidden");
     accountSignedIn.classList.remove("hidden");
-    accountWhoami.textContent = `Signed in as ${name}`;
+    accountWhoami.textContent = t("signed_in_as", { name });
     // The account becomes the identity used to create/join rooms too, so
     // its stats are the ones actually being played for -- still editable
     // if they'd rather play under a different name (only the account's own
@@ -202,10 +207,10 @@
     if (!res.ok) return;
     const s = res.stats;
     statsList.innerHTML = `
-      <li><span>Games played</span><span>${s.gamesPlayed}</span></li>
-      <li><span>Best score</span><span>💯 ${s.bestScore}</span></li>
-      <li><span>Total score</span><span>💯 ${s.totalScore}</span></li>
-      <li><span>Last played</span><span>${s.lastPlayedAt ? new Date(s.lastPlayedAt).toLocaleString() : "—"}</span></li>`;
+      <li><span>${t("stat_games_played")}</span><span>${s.gamesPlayed}</span></li>
+      <li><span>${t("stat_best_score")}</span><span>💯 ${s.bestScore}</span></li>
+      <li><span>${t("stat_total_score")}</span><span>💯 ${s.totalScore}</span></li>
+      <li><span>${t("stat_last_played")}</span><span>${s.lastPlayedAt ? new Date(s.lastPlayedAt).toLocaleString() : t("stat_never")}</span></li>`;
     statsModalBackdrop.classList.remove("hidden");
   });
   document.getElementById("statsCloseBtn").addEventListener("click", () => statsModalBackdrop.classList.add("hidden"));
@@ -262,7 +267,7 @@
     // homescreen — one code, sourced from the URL, not a second manual entry.
     roomCodeInput.value = arcadeRoomCode;
     roomCodeInput.disabled = true;
-    document.querySelector(".divider").textContent = "Joining party " + arcadeRoomCode + "…";
+    document.querySelector(".divider").textContent = t("joining_party", { code: arcadeRoomCode });
     document.getElementById("createRoomBtn").classList.add("hidden");
 
     const me = (arcade.room.players || []).find((p) => p.playerId === arcadePlayerId);
@@ -286,7 +291,7 @@
       // homescreen) — let them type a name as usual, but also enroll them
       // in the arcade party so it carries forward from here too.
       const joinBtn = document.getElementById("joinRoomBtn");
-      joinBtn.textContent = "Join Party";
+      joinBtn.textContent = t("join_party_button");
       joinBtn.addEventListener("click", () => {
         const name = usernameInput.value.trim();
         if (name) QMojiArcade.joinRoom(arcadeRoomCode, name).catch(() => {});
@@ -314,11 +319,11 @@
     for (const p of view.players) {
       if (p.playerId === myId && p.isHost) amHost = true;
       const li = document.createElement("li");
-      li.innerHTML = `<span><span class="swatch" style="background:${colorFor(p.playerId)}"></span>${escapeHtml(p.username)}${p.isHost ? " (host)" : ""}</span>`;
+      li.innerHTML = `<span><span class="swatch" style="background:${colorFor(p.playerId)}"></span>${escapeHtml(p.username)}${p.isHost ? " " + t("host_suffix") : ""}</span>`;
       waitingPlayers.appendChild(li);
     }
     startGameBtn.classList.toggle("hidden", !amHost);
-    waitingHint.textContent = amHost ? "" : "Waiting for the host to start the game...";
+    waitingHint.textContent = amHost ? "" : t("waiting_for_host");
     lastPlayers = view.players;
   }
 
@@ -326,8 +331,7 @@
   const boardEl = document.getElementById("board");
   const gameEl = document.getElementById("game");
   const keywordEl = document.getElementById("keywordName");
-  const roundNumEl = document.getElementById("roundNum");
-  const roundTotalEl = document.getElementById("roundTotal");
+  const roundInfoEl = document.getElementById("roundInfo");
   const timerFillEl = document.getElementById("timerFill");
   const nextRoundNoteEl = document.getElementById("nextRoundNote");
   const firstToFlagNoteEl = document.getElementById("firstToFlagNote");
@@ -479,7 +483,7 @@
   function updateNextRoundCountdown(view) {
     if (!view.nextRoundAt) { hideNextRoundCountdown(); return; }
     const remaining = Math.max(0, Math.ceil((view.nextRoundAt - Date.now()) / 1000));
-    nextRoundNoteEl.textContent = remaining > 0 ? `Next round in ${remaining}…` : "Next round…";
+    nextRoundNoteEl.textContent = remaining > 0 ? t("next_round_in", { seconds: remaining }) : t("next_round_now");
     nextRoundNoteEl.classList.remove("hidden");
   }
   function hideNextRoundCountdown() {
@@ -543,7 +547,7 @@
     if (!username || username === announcedFirstToFlag) return;
     announcedFirstToFlag = username;
     const mine = lastPlayers.find((p) => p.playerId === myId)?.username === username;
-    firstToFlagNoteEl.textContent = `🏆 ${mine ? "You" : username} reached the flag first! +50`;
+    firstToFlagNoteEl.textContent = t("first_to_flag", { who: mine ? t("first_to_flag_you") : username });
     firstToFlagNoteEl.classList.remove("hidden");
     firstToFlagNoteEl.style.animation = "none";
     void firstToFlagNoteEl.offsetWidth;
@@ -643,7 +647,7 @@
       const li = document.createElement("li");
       if (p.eliminated) li.classList.add("eliminated");
       li.innerHTML = `
-        <span class="name"><span class="dot" style="background:${colorFor(p.playerId)}"></span>${escapeHtml(p.username)}${p.playerId === myId ? " (you)" : ""}</span>
+        <span class="name"><span class="dot" style="background:${colorFor(p.playerId)}"></span>${escapeHtml(p.username)}${p.playerId === myId ? " " + t("you_suffix") : ""}</span>
         <span>💯 ${p.score}${p.eliminated ? "" : " &nbsp; " + shieldRow(p.lives, startingLives, true)}</span>`;
       scoreboardListEl.appendChild(li);
     }
@@ -654,8 +658,7 @@
     hideNextRoundCountdown();
     firstToFlagNoteEl.classList.add("hidden");
     announcedFirstToFlag = null;
-    roundNumEl.textContent = view.round;
-    roundTotalEl.textContent = view.totalRounds;
+    roundInfoEl.textContent = t("round_progress", { round: view.round, total: view.totalRounds });
     keywordEl.textContent = view.keyword;
     renderGrid(view);
     lastPlayers = view.players;
@@ -714,7 +717,7 @@
         leaderboardListEl.innerHTML = "";
         for (const entry of data.leaderboard || []) {
           const li = document.createElement("li");
-          li.innerHTML = `<span>${escapeHtml(entry.username)}</span><span>best 💯 ${entry.bestScore} · ${entry.gamesPlayed} games</span>`;
+          li.innerHTML = `<span>${escapeHtml(entry.username)}</span><span>${t("all_time_score_summary", { score: entry.bestScore, games: entry.gamesPlayed })}</span>`;
           leaderboardListEl.appendChild(li);
         }
       })
@@ -729,13 +732,13 @@
     finalScoreboardEl.innerHTML = "";
     sorted.forEach((p, i) => {
       const li = document.createElement("li");
-      li.innerHTML = `<span><span class="swatch" style="background:${colorFor(p.playerId)}"></span>#${i + 1} ${escapeHtml(p.username)}${p.playerId === myId ? " (you)" : ""}</span><span>💯 ${p.score}</span>`;
+      li.innerHTML = `<span><span class="swatch" style="background:${colorFor(p.playerId)}"></span>#${i + 1} ${escapeHtml(p.username)}${p.playerId === myId ? " " + t("you_suffix") : ""}</span><span>💯 ${p.score}</span>`;
       finalScoreboardEl.appendChild(li);
     });
     loadAllTimeLeaderboard();
     const me = view.players.find((p) => p.playerId === myId);
     playAgainBtn.classList.toggle("hidden", !(me && me.isHost));
-    overHint.textContent = me && me.isHost ? "" : "Waiting for the host to start a new game...";
+    overHint.textContent = me && me.isHost ? "" : t("waiting_for_new_game");
   }
 
   // A move's own POST response and the background poller both resolve
