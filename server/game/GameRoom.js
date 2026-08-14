@@ -166,6 +166,30 @@ function removePlayer(room, playerId) {
   return wasPresent;
 }
 
+// ---- host controls ----
+
+// Lobby-only: once the game has started, players are mid-round (eaten
+// cells, lives, scores) and removal mid-game risks leaving that state
+// inconsistent -- a disruptive player can still be dealt with by waiting
+// for the round to end, or by the host restarting the game.
+function kickPlayer(room, requesterId, targetId) {
+  if (requesterId !== room.hostId) throw new Error("Only the host can remove a player.");
+  if (targetId === requesterId) throw new Error("You can't remove yourself -- use Go Home instead.");
+  if (room.status !== "lobby") throw new Error("Can't remove a player once the game has started.");
+  if (!room.players[targetId]) throw new Error("That player is no longer in the room.");
+  removePlayer(room, targetId);
+}
+
+// No status restriction (unlike kickPlayer) -- handing host to someone else
+// mid-game is harmless, since host-only actions (start/restart) aren't
+// reachable again until the game returns to the lobby anyway.
+function transferHost(room, requesterId, targetId) {
+  if (requesterId !== room.hostId) throw new Error("Only the host can transfer host.");
+  if (targetId === requesterId) return;
+  if (!room.players[targetId]) throw new Error("That player is no longer in the room.");
+  room.hostId = targetId;
+}
+
 // Sent every few seconds by a connected client -- there's no persistent
 // socket left for the server to notice a disconnect with, so presence is
 // tracked this way instead. Actual staleness detection happens lazily in
@@ -647,6 +671,8 @@ module.exports = {
   isEmpty,
   addPlayer,
   removePlayer,
+  kickPlayer,
+  transferHost,
   heartbeat,
   startGame,
   restartGame,

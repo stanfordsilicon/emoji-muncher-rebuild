@@ -186,6 +186,22 @@ input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 10px v
 .player-list.small li { font-size: 14px; padding: 6px 10px; }
 .player-list .swatch { display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:8px; }
 
+.player-actions { display: flex; gap: 6px; flex-shrink: 0; }
+.player-action-btn {
+  padding: 4px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--panel-line);
+  background: var(--bg-deep);
+  color: var(--ink-soft);
+  font-family: var(--pixel-font);
+  font-size: 8px;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+.player-action-btn:hover { border-color: var(--cyan); color: var(--cyan); }
+.player-action-btn.kick:hover { border-color: var(--orange); color: var(--orange); }
+
 /* ---- game screen ---- */
 #screen-game { align-items: flex-start; gap: 24px; flex-wrap: wrap; padding: 64px 12px 12px; }
 /* max-width is set from JS (applyCellSize), sized off the board's actual

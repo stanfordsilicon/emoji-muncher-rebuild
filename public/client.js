@@ -231,11 +231,44 @@
     showScreen("waiting");
     waitingCode.textContent = view.code;
     waitingPlayers.innerHTML = "";
-    let amHost = false;
+    const amHost = view.players.some((p) => p.playerId === myId && p.isHost);
     for (const p of view.players) {
-      if (p.playerId === myId && p.isHost) amHost = true;
       const li = document.createElement("li");
-      li.innerHTML = `<span><span class="swatch" style="background:${colorFor(p.playerId)}"></span>${escapeHtml(p.username)}${p.isHost ? " " + t("host_suffix") : ""}</span>`;
+      const nameEl = document.createElement("span");
+      nameEl.innerHTML = `<span class="swatch" style="background:${colorFor(p.playerId)}"></span>${escapeHtml(p.username)}${p.isHost ? " " + t("host_suffix") : ""}`;
+      li.appendChild(nameEl);
+
+      // Host-only controls for every OTHER player in the room -- kicking
+      // yourself would just be leaving, and transferring host to yourself
+      // is a no-op, so neither button is shown on the host's own row.
+      if (amHost && p.playerId !== myId) {
+        const actions = document.createElement("span");
+        actions.className = "player-actions";
+
+        const makeHostBtn = document.createElement("button");
+        makeHostBtn.type = "button";
+        makeHostBtn.className = "player-action-btn";
+        makeHostBtn.textContent = t("make_host_button");
+        makeHostBtn.addEventListener("click", async () => {
+          const res = await api("transfer-host", { targetId: p.playerId });
+          if (res.ok) applySnapshotIfFresh(res.room);
+        });
+        actions.appendChild(makeHostBtn);
+
+        const kickBtn = document.createElement("button");
+        kickBtn.type = "button";
+        kickBtn.className = "player-action-btn kick";
+        kickBtn.textContent = t("kick_button");
+        kickBtn.addEventListener("click", async () => {
+          if (!window.confirm(t("kick_confirm", { name: p.username }))) return;
+          const res = await api("kick-player", { targetId: p.playerId });
+          if (res.ok) applySnapshotIfFresh(res.room);
+        });
+        actions.appendChild(kickBtn);
+
+        li.appendChild(actions);
+      }
+
       waitingPlayers.appendChild(li);
     }
     startGameBtn.classList.toggle("hidden", !amHost);
@@ -333,6 +366,24 @@
   }
   document.getElementById("homeBtnGame").addEventListener("click", goHome);
   document.getElementById("homeBtnOver").addEventListener("click", goHome);
+
+  // Same reset as goHome(), minus the leave-room call (we're already out
+  // server-side -- that's how this got triggered), plus a visible reason so
+  // it doesn't look like the room just silently vanished.
+  function handleKicked() {
+    stopPolling();
+    stopHeartbeat();
+    currentRoomCode = null;
+    lastRoomView = null;
+    colorByPlayer.clear();
+    cellEls.clear();
+    muncherEls.clear();
+    animatingKeys.clear();
+    myPrev = null;
+    roomCodeInput.value = "";
+    showScreen("lobby");
+    showError(lobbyError, t("kicked_from_room"));
+  }
 
   // Explicit "leaving right now" signal for the common case (closing the
   // tab) — sendBeacon is used because a plain fetch can get cancelled
@@ -687,6 +738,20 @@
   let appliedVersion = -1;
   function applySnapshotIfFresh(view) {
     if (typeof view.version === "number" && view.version < appliedVersion) return;
+
+    // Detects being kicked: we were previously confirmed in this room
+    // (lastRoomView exists), but this fresher snapshot's player list no
+    // longer includes us. The only path that removes a still-polling
+    // player from the array like this is the host's kick action -- an
+    // explicit "leave" already tears down polling locally first, and a
+    // dropped connection just flips connected=false without removing the
+    // seat. Checked before the version-freshness bookkeeping below so a
+    // stale-looking response can't hide a real kick.
+    if (lastRoomView && currentRoomCode && Array.isArray(view.players) && !view.players.some((p) => p.playerId === myId)) {
+      handleKicked();
+      return;
+    }
+
     appliedVersion = view.version;
 
     // An in-flight optimistic move (see predictMove below) can race against

@@ -263,6 +263,29 @@ app.post("/api/leave-room", async (req, res) => {
   }
 });
 
+// Host-only, lobby-only -- see GameRoom.kickPlayer for why kicking is
+// restricted to before the game starts.
+app.post("/api/kick-player", async (req, res) => {
+  try {
+    const { code, playerId, targetId } = req.body || {};
+    const room = await lobbyManager.kickPlayer(normCode(code), normId(playerId), normId(targetId));
+    res.json({ ok: true, room: GameRoom.toClientView(room) });
+  } catch (err) {
+    res.json({ ok: false, error: err.message });
+  }
+});
+
+// Host-only. Unlike kick-player, this works at any room status.
+app.post("/api/transfer-host", async (req, res) => {
+  try {
+    const { code, playerId, targetId } = req.body || {};
+    const room = await lobbyManager.transferHost(normCode(code), normId(playerId), normId(targetId));
+    res.json({ ok: true, room: GameRoom.toClientView(room) });
+  } catch (err) {
+    res.json({ ok: false, error: err.message });
+  }
+});
+
 // Polling endpoint — replaces the old lobby_state/round_start/state_update/
 // round_end/game_over socket broadcasts. Every response is the full
 // authoritative room snapshot, same as those broadcasts always were.

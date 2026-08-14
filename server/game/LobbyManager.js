@@ -196,6 +196,18 @@ async function leaveRoom(code, playerId) {
   return mutateRoom(code, (r) => GameRoom.removePlayer(r, playerId));
 }
 
+async function kickPlayer(code, requesterId, targetId) {
+  const room = await mutateRoom(code, (r) => GameRoom.kickPlayer(r, requesterId, targetId));
+  if (!room) throw new Error("Room not found");
+  return room;
+}
+
+async function transferHost(code, requesterId, targetId) {
+  const room = await mutateRoom(code, (r) => GameRoom.transferHost(r, requesterId, targetId));
+  if (!room) throw new Error("Room not found");
+  return room;
+}
+
 // Marks a finished room's analytics as already recorded, so a concurrent or
 // repeated poll doesn't write duplicate score/analytics documents.
 // Best-effort, like the rest of the analytics path -- server/app.js calls
@@ -219,5 +231,7 @@ module.exports = {
   move,
   heartbeat,
   leaveRoom,
+  kickPlayer,
+  transferHost,
   markAnalyticsSaved,
 };
