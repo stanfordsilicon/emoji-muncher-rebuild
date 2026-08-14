@@ -581,7 +581,7 @@
     firstToFlagNoteEl.classList.add("hidden");
     announcedFirstToFlag = null;
     roundInfoEl.textContent = t("round_progress", { round: view.round, total: view.totalRounds });
-    keywordEl.textContent = view.keyword;
+    keywordEl.textContent = view.keywordLabel || view.keyword;
     renderGrid(view);
     lastPlayers = view.players;
     renderMunchers(view.players);
@@ -688,6 +688,30 @@
   function applySnapshotIfFresh(view) {
     if (typeof view.version === "number" && view.version < appliedVersion) return;
     appliedVersion = view.version;
+
+    // An in-flight optimistic move (see predictMove below) can race against
+    // the independent poll loop: a poll response can land *between* the
+    // optimistic prediction and that move's own response, still carrying
+    // the pre-move position, and would otherwise visibly snap the muncher
+    // back for a moment. While a move is unconfirmed and we're still in the
+    // same round it was made in, pin our own position to the latest local
+    // prediction instead of whatever the snapshot says -- the move's own
+    // response (or a later poll, once pendingMoveCount drops to 0) is what
+    // actually reconciles it. A round transition invalidates any pending
+    // prediction outright (a fresh round respawns everyone server-side).
+    const isSameRoundInProgress =
+      view.status === "playing" && lastRoomView && lastRoomView.status === "playing" && lastRoomView.round === view.round;
+    if (pendingMoveCount > 0 && optimisticPos && isSameRoundInProgress && Array.isArray(view.players)) {
+      const me = view.players.find((p) => p.playerId === myId);
+      if (me && !me.eliminated && !me.roundDone) {
+        me.muncherCol = optimisticPos.col;
+        me.muncherRow = optimisticPos.row;
+      }
+    } else {
+      pendingMoveCount = 0;
+      optimisticPos = null;
+    }
+
     applyRoomSnapshot(view);
   }
 
@@ -745,17 +769,50 @@
   // one dropped request, so they're stuck until they happen to try again.
   // Retrying here invisibly is what actually fixes that: almost every
   // failure clears on the very next attempt a few hundred ms later.
+  // Counts unconfirmed optimistic moves (see predictMove) so applySnapshotIfFresh
+  // knows whether to trust an incoming snapshot's position for our own player yet.
+  let pendingMoveCount = 0;
+  let optimisticPos = null; // { col, row }, or null once every predicted move is confirmed
+  function settleOneMove() {
+    pendingMoveCount = Math.max(0, pendingMoveCount - 1);
+    if (pendingMoveCount === 0) optimisticPos = null;
+  }
+
   const MOVE_RETRY_DELAYS_MS = [120, 250, 400];
   function attemptMove(dir, attempt) {
     api("move", { dir }).then((res) => {
       if (res.ok) {
+        settleOneMove();
         applySnapshotIfFresh(res.room);
         return;
       }
       if (attempt < MOVE_RETRY_DELAYS_MS.length) {
         setTimeout(() => attemptMove(dir, attempt + 1), MOVE_RETRY_DELAYS_MS[attempt]);
+      } else {
+        settleOneMove();
       }
     });
+  }
+
+  // Movement here is only ever clamped at the grid edge -- no walls, no
+  // hidden server-only data -- so the client can predict the exact same
+  // result the server will compute, instead of waiting a full round-trip
+  // (100-400ms+ on a cold serverless instance) before the muncher visibly
+  // moves. This is what actually fixes "arrow keys feel laggy": the token
+  // now moves the instant you press a key, and the network request behind
+  // it just confirms (or, on a real rejection like round-done, corrects)
+  // that a moment later via the normal applySnapshotIfFresh path.
+  const MOVE_DELTAS = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
+  function predictMove(dir) {
+    const delta = MOVE_DELTAS[dir];
+    const me = lastPlayers.find((p) => p.playerId === myId);
+    if (!me || !delta) return;
+    const col = Math.max(0, Math.min(cols - 1, me.muncherCol + delta[0]));
+    const row = Math.max(0, Math.min(rows - 1, me.muncherRow + delta[1]));
+    optimisticPos = { col, row };
+    me.muncherCol = col;
+    me.muncherRow = row;
+    renderMunchers(lastPlayers);
   }
 
   function sendMove(dir) {
@@ -763,6 +820,8 @@
     const now = Date.now();
     if (now - lastMoveSentAt < CLIENT_MOVE_THROTTLE_MS) return;
     lastMoveSentAt = now;
+    predictMove(dir);
+    pendingMoveCount += 1;
     attemptMove(dir, 0);
   }
 

@@ -1,6 +1,6 @@
 "use strict";
 
-const { createEmojiRepository } = require("./EmojiRepository");
+const { createConceptRepository } = require("./ConceptRepository");
 const { createScoreRepository } = require("./ScoreRepository");
 const { createAnalyticsRepository } = require("./AnalyticsRepository");
 const { createSessionStore } = require("./SessionStore");
@@ -31,14 +31,14 @@ const { createSessionStore } = require("./SessionStore");
  * mongo here closes that gap without requiring both to be kept in sync by
  * hand.
  *
- * The emoji/keyword dataset (EmojiRepository) is deliberately always
- * in-memory, loaded from emojiData.json -- it's the static "backend
+ * The emoji/keyword dataset (ConceptRepository) is deliberately always
+ * in-memory, loaded from conceptClusters.json -- it's the static "backend
  * database" used for correctness-checking, not a thing we collect data
  * into, so it has no mongo variant.
  */
 const DATA_BACKEND = process.env.DATA_BACKEND || (process.env.MONGODB_URI ? "mongo" : "memory");
 
-const emojiRepository = createEmojiRepository({ backend: "memory" });
+const emojiRepository = createConceptRepository();
 const scoreRepository = createScoreRepository({ backend: DATA_BACKEND });
 const analyticsRepository = createAnalyticsRepository({ backend: DATA_BACKEND });
 const sessionStore = createSessionStore({ backend: DATA_BACKEND });

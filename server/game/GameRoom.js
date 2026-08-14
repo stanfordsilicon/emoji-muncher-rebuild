@@ -66,6 +66,7 @@ function createRoom(code) {
     playerOrder: [],
     round: 0,
     keyword: null,
+    keywordLabel: null,
     grid: [],
     correctCount: 0,
     destination: null,
@@ -205,6 +206,7 @@ function restartGame(room, requesterId) {
   room.status = "lobby";
   room.round = 0;
   room.keyword = null;
+  room.keywordLabel = null;
   room.grid = [];
   room.destination = null;
   room.eatenCells = {};
@@ -357,15 +359,28 @@ function emojiMetaForGrid(grid, keyword) {
     if (!seen.has(cell.symbol)) {
       seen.set(cell.symbol, {
         symbol: cell.symbol,
-        // Every keyword-emoji pair in the current dataset came directly
-        // from the user-submitted CSV, so there is no "inferred" layer
-        // yet -- this flag is a placeholder for when/if one is added.
-        confirmedOrInferred: "confirmed",
+        // Every keyword-emoji pair now comes from ConceptRepository's
+        // unsupervised clustering, not a hand-curated list, so every match
+        // is genuinely inferred rather than manually confirmed.
+        confirmedOrInferred: "inferred",
         poisonStatus: emojiRepository.isMatch(cell.symbol, keyword) ? "safe" : "poison",
       });
     }
   }
   return [...seen.values()];
+}
+
+// Escalates the concept-cluster resolution (see ConceptRepository) across
+// the game's rounds: broad/easy k=20 clusters early, down to fine-grained
+// k=150 near-duplicates by the last round -- both the "correct" concept and
+// its decoy pool get subtler together, since both are drawn from the same
+// tier. Proportional to ROUND_COUNT rather than hardcoded round numbers so
+// a different round count still spans easy-to-hard sensibly.
+function tierForRound(round, totalRounds) {
+  const progress = totalRounds > 1 ? (round - 1) / (totalRounds - 1) : 1;
+  if (progress < 0.4) return 20;
+  if (progress < 0.75) return 60;
+  return 150;
 }
 
 function nextRound(room) {
@@ -384,9 +399,10 @@ function nextRound(room) {
     cols: config.GRID_COLS,
     rows: config.GRID_ROWS,
     minMatches: config.MIN_MATCHES_PER_KEYWORD,
-    pathsPerCorner: config.PATHS_PER_CORNER,
+    difficultyTier: tierForRound(room.round, config.ROUND_COUNT),
   });
   room.keyword = keyword;
+  room.keywordLabel = emojiRepository.getKeywordLabel(keyword);
   room.grid = grid;
   room.correctCount = correctCount;
   room.destination = destination ? { col: destination.col, row: destination.row } : null;
@@ -415,6 +431,7 @@ function nextRound(room) {
     player.currentRoundEntry = {
       roundNumber: room.round,
       keyword,
+      keywordLabel: room.keywordLabel,
       board: grid.map((c) => ({ col: c.col, row: c.row, symbol: c.symbol })),
       totalCells: config.GRID_COLS * config.GRID_ROWS,
       correctCount,
@@ -424,8 +441,7 @@ function nextRound(room) {
       avgSafeChoicesPerMove: difficulty.avgSafeChoicesPerMove,
       narrowPathIndicator: difficulty.narrowPathIndicator,
       safeClusterCount: difficulty.safeClusterCount,
-      pathRepairs: difficulty.pathRepairs,
-      datasetVersion: "qmoji-csv-v1", // no inference/poison-selection model yet; static curated dataset
+      datasetVersion: "qmoji-concept-clusters-v1", // ConceptRepository, unsupervised clustering over emoji
       emojiMeta,
       startedAt: new Date(room.roundStartedAt),
       endedAt: null,
@@ -611,6 +627,7 @@ function toClientView(room) {
     round: room.round,
     totalRounds: config.ROUND_COUNT,
     keyword: room.keyword,
+    keywordLabel: room.keywordLabel,
     grid: room.grid.map((c) => ({ col: c.col, row: c.row, symbol: c.symbol })),
     destination: room.destination,
     cols: config.GRID_COLS,

@@ -27,6 +27,5 @@ module.exports = {
   // to eat. Raised from 3 to keep rounds themed around keywords with real
   // symbol variety instead.
   MIN_MATCHES_PER_KEYWORD: num("MIN_MATCHES_PER_KEYWORD", 8),
-  PATHS_PER_CORNER: num("PATHS_PER_CORNER", 2),
   ROOM_CODE_LENGTH: num("ROOM_CODE_LENGTH", 4),
 };
