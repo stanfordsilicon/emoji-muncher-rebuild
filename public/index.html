@@ -48,37 +48,8 @@
     </div>
 
     <p id="lobbyError" class="error"></p>
-
-    <div class="account-box">
-      <div id="accountSignedOut">
-        <button id="accountToggleBtn" class="link-btn" type="button" data-i18n="sign_in_prompt">🔐 Sign in for personal stats</button>
-        <div id="authForm" class="auth-form hidden">
-          <input id="authUsername" data-i18n-placeholder="auth_username_placeholder" placeholder="Username" autocomplete="username">
-          <input id="authPassword" type="password" data-i18n-placeholder="auth_password_placeholder" placeholder="Password" autocomplete="current-password">
-          <div class="row">
-            <button id="signInBtn" class="btn" data-i18n="sign_in_button">Sign In</button>
-            <button id="signUpBtn" class="btn" data-i18n="sign_up_button">Sign Up</button>
-          </div>
-          <p id="authError" class="error"></p>
-        </div>
-      </div>
-      <div id="accountSignedIn" class="hidden">
-        <span id="accountWhoami"></span>
-        <button id="myStatsBtn" class="link-btn" type="button" data-i18n="my_stats_button">📊 My Stats</button>
-        <button id="signOutBtn" class="link-btn" type="button" data-i18n="sign_out_button">Sign out</button>
-      </div>
-    </div>
   </div>
 </section>
-
-<!-- ============ MY STATS MODAL ============ -->
-<div id="statsModalBackdrop" class="modal-backdrop hidden">
-  <div class="panel">
-    <h2 data-i18n="my_stats_title">📊 My Stats</h2>
-    <ul id="statsList" class="player-list"></ul>
-    <button id="statsCloseBtn" class="btn primary" data-i18n="close_button">Close</button>
-  </div>
-</div>
 
 <!-- ============ WAITING ROOM ============ -->
 <section id="screen-waiting" class="screen hidden">

@@ -115,7 +115,7 @@
   document.getElementById("createRoomBtn").addEventListener("click", async () => {
     const username = getUsername();
     if (!username) return;
-    const res = await api("create-room", { username, token: sessionToken });
+    const res = await api("create-room", { username });
     if (!res.ok) return showError(lobbyError, res.error);
     enterRoom(res.room);
   });
@@ -125,7 +125,7 @@
     if (!username) return;
     const code = roomCodeInput.value.trim().toUpperCase();
     if (!code) return showError(lobbyError, t("room_code_required_error"));
-    const res = await api("join-room", { username, code, token: sessionToken });
+    const res = await api("join-room", { username, code });
     if (!res.ok) return showError(lobbyError, res.error);
     enterRoom(res.room);
   });
@@ -137,94 +137,10 @@
   document.getElementById("playSoloBtn").addEventListener("click", async () => {
     const username = getUsername();
     if (!username) return;
-    const res = await api("create-room", { username, solo: true, token: sessionToken });
+    const res = await api("create-room", { username, solo: true });
     if (!res.ok) return showError(lobbyError, res.error);
     enterRoom(res.room);
   });
-
-  // ---- accounts: sign in / sign up / My Stats ----
-  // Guest play (just typing a username) still works exactly as before --
-  // an account is only needed to protect a name and look up personal stats
-  // later, never required to play.
-  const SESSION_TOKEN_KEY = "emojimunchers_session_token";
-  let sessionToken = localStorage.getItem(SESSION_TOKEN_KEY) || null;
-
-  const accountToggleBtn = document.getElementById("accountToggleBtn");
-  const authForm = document.getElementById("authForm");
-  const authUsernameInput = document.getElementById("authUsername");
-  const authPasswordInput = document.getElementById("authPassword");
-  const authErrorEl = document.getElementById("authError");
-  const accountSignedOut = document.getElementById("accountSignedOut");
-  const accountSignedIn = document.getElementById("accountSignedIn");
-  const accountWhoami = document.getElementById("accountWhoami");
-  const statsModalBackdrop = document.getElementById("statsModalBackdrop");
-  const statsList = document.getElementById("statsList");
-
-  accountToggleBtn.addEventListener("click", () => authForm.classList.toggle("hidden"));
-
-  function applySignedIn(name) {
-    accountSignedOut.classList.add("hidden");
-    accountSignedIn.classList.remove("hidden");
-    accountWhoami.textContent = t("signed_in_as", { name });
-    // The account becomes the identity used to create/join rooms too, so
-    // its stats are the ones actually being played for -- still editable
-    // if they'd rather play under a different name (only the account's own
-    // name is protected; see the server's ownership guard).
-    if (!usernameInput.value.trim()) usernameInput.value = name;
-  }
-
-  function applySignedOut() {
-    accountSignedOut.classList.remove("hidden");
-    accountSignedIn.classList.add("hidden");
-  }
-
-  function handleAuthResponse(res) {
-    if (!res.ok) { authErrorEl.textContent = res.error; return; }
-    authErrorEl.textContent = "";
-    sessionToken = res.token;
-    localStorage.setItem(SESSION_TOKEN_KEY, res.token);
-    authForm.classList.add("hidden");
-    applySignedIn(res.username);
-  }
-
-  document.getElementById("signUpBtn").addEventListener("click", async () => {
-    const res = await api("sign-up", { username: authUsernameInput.value.trim(), password: authPasswordInput.value });
-    handleAuthResponse(res);
-  });
-  document.getElementById("signInBtn").addEventListener("click", async () => {
-    const res = await api("sign-in", { username: authUsernameInput.value.trim(), password: authPasswordInput.value });
-    handleAuthResponse(res);
-  });
-  document.getElementById("signOutBtn").addEventListener("click", async () => {
-    await api("sign-out", { token: sessionToken });
-    sessionToken = null;
-    localStorage.removeItem(SESSION_TOKEN_KEY);
-    applySignedOut();
-  });
-
-  document.getElementById("myStatsBtn").addEventListener("click", async () => {
-    const res = await api("get-my-stats", { token: sessionToken });
-    if (!res.ok) return;
-    const s = res.stats;
-    statsList.innerHTML = `
-      <li><span>${t("stat_games_played")}</span><span>${s.gamesPlayed}</span></li>
-      <li><span>${t("stat_best_score")}</span><span>💯 ${s.bestScore}</span></li>
-      <li><span>${t("stat_total_score")}</span><span>💯 ${s.totalScore}</span></li>
-      <li><span>${t("stat_last_played")}</span><span>${s.lastPlayedAt ? new Date(s.lastPlayedAt).toLocaleString() : t("stat_never")}</span></li>`;
-    statsModalBackdrop.classList.remove("hidden");
-  });
-  document.getElementById("statsCloseBtn").addEventListener("click", () => statsModalBackdrop.classList.add("hidden"));
-  statsModalBackdrop.addEventListener("click", (e) => {
-    if (e.target === statsModalBackdrop) statsModalBackdrop.classList.add("hidden");
-  });
-
-  // Silent restore from a saved session token on page load.
-  (async function restoreSession() {
-    if (!sessionToken) return;
-    const res = await api("sign-in-with-token", { token: sessionToken });
-    if (res && res.ok) applySignedIn(res.username);
-    else { sessionToken = null; localStorage.removeItem(SESSION_TOKEN_KEY); }
-  })();
 
   // ---- QMoji Arcade: party continuity from the homescreen ----
   // Enhancement only — if there's no ?room= or the lookup fails, none of
@@ -275,7 +191,7 @@
     if (me) {
       // Known party member — skip the manual entry screen entirely.
       usernameInput.value = me.name;
-      const res = await api("join-room", { username: me.name, code: arcadeRoomCode, token: sessionToken });
+      const res = await api("join-room", { username: me.name, code: arcadeRoomCode });
       if (res.ok) {
         enterRoom(res.room);
         return;
@@ -283,7 +199,7 @@
       if (res.error === "Room not found") {
         // First arcade player to reach this game — seed a room under the
         // party's own code instead of letting the server generate one.
-        const created = await api("create-room", { username: me.name, code: arcadeRoomCode, token: sessionToken });
+        const created = await api("create-room", { username: me.name, code: arcadeRoomCode });
         if (created.ok) enterRoom(created.room);
       }
     } else {
@@ -523,6 +439,10 @@
   function markSlimed(cellEl, color) {
     cellEl.classList.add("slimed");
     cellEl.style.background = hexToRgba(color, 0.35);
+    // The eaten emoji disappears rather than sitting there tinted -- a
+    // munched cell reads more clearly as "empty, already handled" than as
+    // "still has an emoji in it, just recolored."
+    cellEl.textContent = "";
   }
 
   // Cells are shared across the whole room (GameRoom's resolveMunch) -- once
@@ -612,6 +532,7 @@
         animatingKeys.add(key);
         if (correct) {
           cellEl.classList.add("correct-flash");
+          window.SFX.munch();
           window.SFX.correct();
           setTimeout(() => {
             markSlimed(cellEl, myColor);
@@ -620,6 +541,7 @@
           }, 260);
         } else if (livesLost) {
           cellEl.classList.add("wrong-flash");
+          window.SFX.munch();
           const shieldEl = myLivesEl.querySelectorAll(".shield-icon")[me.lives];
           flyToShield(cellEl, shieldEl);
           setTimeout(() => {
@@ -813,14 +735,35 @@
   // real tap cadence rather than mirroring a server-side cooldown.
   const CLIENT_MOVE_THROTTLE_MS = 40;
   let lastMoveSentAt = 0;
+
+  // A move can come back !ok for a purely transient reason -- e.g. a cold
+  // serverless instance's Mongo connection momentarily missing a room that
+  // genuinely exists (see server/game/LobbyManager.js's mutateRoom retry
+  // comment). Previously a failed move just silently did nothing, which is
+  // exactly what "I pressed the arrow and the game stopped responding"
+  // looks like from the player's side -- they can't tell a real freeze from
+  // one dropped request, so they're stuck until they happen to try again.
+  // Retrying here invisibly is what actually fixes that: almost every
+  // failure clears on the very next attempt a few hundred ms later.
+  const MOVE_RETRY_DELAYS_MS = [120, 250, 400];
+  function attemptMove(dir, attempt) {
+    api("move", { dir }).then((res) => {
+      if (res.ok) {
+        applySnapshotIfFresh(res.room);
+        return;
+      }
+      if (attempt < MOVE_RETRY_DELAYS_MS.length) {
+        setTimeout(() => attemptMove(dir, attempt + 1), MOVE_RETRY_DELAYS_MS[attempt]);
+      }
+    });
+  }
+
   function sendMove(dir) {
     if (amRoundDone()) return;
     const now = Date.now();
     if (now - lastMoveSentAt < CLIENT_MOVE_THROTTLE_MS) return;
     lastMoveSentAt = now;
-    api("move", { dir }).then((res) => {
-      if (res.ok) applySnapshotIfFresh(res.room);
-    });
+    attemptMove(dir, 0);
   }
 
   const DIR_KEYS = {

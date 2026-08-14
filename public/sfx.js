@@ -33,6 +33,12 @@
   window.SFX = {
     setMuted(v) { muted = v; },
     isMuted() { return muted; },
+    // A quick, satisfying "chomp" for every successful munch -- distinct
+    // from correct() (the reward chime for matching the keyword), since
+    // this plays on *every* eat, right/wrong, before that verdict lands.
+    munch() {
+      tone({ freq: 180, startFreq: 520, duration: 0.06, type: "square", gain: 0.14 });
+    },
     correct() {
       tone({ freq: 880, duration: 0.09, type: "triangle" });
       tone({ freq: 1320, duration: 0.12, type: "triangle", delay: 0.06 });

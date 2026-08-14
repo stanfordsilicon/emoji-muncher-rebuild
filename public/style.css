@@ -259,17 +259,34 @@ input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 10px v
 .cell.slimed {
   transition: background-color 0.3s ease;
 }
+/* The destination used to be a subtle border pulse with a tiny 14px flag
+   tucked in the corner -- easy to lose among 60+ same-sized emoji cells.
+   A distinct fill + a big waving flag badge + a stronger pulse (that also
+   scales the cell, not just its glow) makes it readable at a glance
+   instead of something you have to hunt for. */
 .cell.destination {
+  background: linear-gradient(135deg, #fff3b0, #ffe066);
   border-color: var(--accent); border-width: 3px;
-  box-shadow: 0 0 0 2px var(--accent-soft), 0 0 10px 2px var(--accent-glow);
-  animation: destinationPulse 1.6s ease-in-out infinite;
+  box-shadow: 0 0 0 3px var(--accent-soft), 0 0 16px 4px var(--accent-glow);
+  animation: destinationPulse 1.3s ease-in-out infinite;
+  z-index: 5;
 }
 .cell.destination::after {
-  content: "🚩"; position: absolute; top: -8px; right: -6px; font-size: 14px;
+  content: "🚩";
+  position: absolute;
+  top: -16px; right: -12px;
+  font-size: 26px;
+  filter: drop-shadow(0 2px 3px rgba(0,0,0,0.5));
+  animation: destinationFlagWave 0.9s ease-in-out infinite;
+  transform-origin: bottom left;
+}
+@keyframes destinationFlagWave {
+  0%, 100% { transform: rotate(-8deg); }
+  50% { transform: rotate(8deg); }
 }
 @keyframes destinationPulse {
-  0%, 100% { box-shadow: 0 0 0 2px var(--accent-soft), 0 0 10px 2px var(--accent-glow); }
-  50% { box-shadow: 0 0 0 4px rgba(255,233,63,0.75), 0 0 16px 4px rgba(255,233,63,0.85); }
+  0%, 100% { box-shadow: 0 0 0 3px var(--accent-soft), 0 0 16px 4px var(--accent-glow); transform: scale(1); }
+  50% { box-shadow: 0 0 0 6px rgba(255,233,63,0.85), 0 0 28px 8px rgba(255,233,63,0.95); transform: scale(1.08); }
 }
 .cell.correct-flash { animation: correctPop 0.32s ease; }
 .cell.wrong-flash { animation: wrongShake 0.36s ease; border-color: #d94f4f; }
