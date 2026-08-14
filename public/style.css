@@ -198,8 +198,8 @@ input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 10px v
 #topBar { display: flex; align-items: center; justify-content: space-between; padding: 2px 2px 8px; }
 #roundInfo { font-family: var(--pixel-font); font-size: 10px; font-weight: normal; color: var(--ink-soft); letter-spacing: 0.04em; }
 .icon-btn {
-  border: 2px solid var(--panel-line); background: var(--panel); color: var(--ink); width: 32px; height: 32px;
-  border-radius: 50%; cursor: pointer; font-size: 15px; line-height: 1;
+  border: 2px solid var(--panel-line); background: var(--panel); color: var(--ink); width: 46px; height: 46px;
+  border-radius: 50%; cursor: pointer; font-size: 22px; line-height: 1;
   transition: border-color 0.15s ease;
 }
 .icon-btn:hover { border-color: var(--cyan); }
