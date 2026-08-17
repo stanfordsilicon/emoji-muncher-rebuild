@@ -7,11 +7,19 @@ const { generateRound } = require("./gridGenerator");
 /**
  * Core game rules for one Emoji Munchers match, as plain-JSON room state
  * plus pure functions operating on it -- no class instances, no live
- * setTimeout handles, no Map/Set fields, and no Socket.IO/networking
- * knowledge here at all. That's what makes a room safe to persist to Mongo
+ * setTimeout handles, no Map/Set fields, and no networking knowledge here
+ * at all. That's what makes a room safe to persist to Mongo
  * (server/game/store.js) and reload in a completely different process or
- * serverless invocation, and it's also why there's no `emitToRoom` anymore:
- * there's nothing to broadcast to, only state for a poller to read back.
+ * serverless invocation.
+ *
+ * Single-player only: a room always holds exactly one player, keyed by
+ * that player's own client-generated id (see public/client.js's
+ * getDeviceId()) -- there's no room code to share, no join/host/kick, and
+ * no cross-player state. `players`/`playerOrder` stay collection-shaped
+ * (rather than a single `player` field) purely because the round/scoring
+ * logic below was written generically over "every player in the room" and
+ * that logic is correct and unchanged whether the collection holds one
+ * entry or many -- not because more than one entry is ever expected.
  *
  * Round timeouts and the pause between rounds used to be driven by live
  * `setTimeout` handles kept as instance fields (`this.roundTimer`,
@@ -19,12 +27,6 @@ const { generateRound } = require("./gridGenerator");
  * instead every room load "catches up" any time-driven state via
  * applyLazyStateUpdates() before anything else happens to it. See
  * server/game/LobbyManager.js's loadRoom() for where that gets called.
- *
- * Player identity is a client-generated id (see public/client.js's
- * getDeviceId()), NOT a Socket.io socket id -- there's no persistent
- * connection to derive one from anymore, and this also means a refresh or
- * brief network drop no longer has to permanently evict the player (see
- * heartbeat() and the disconnect-grace handling in applyLazyStateUpdates).
  */
 
 const DIRS = {
@@ -43,9 +45,9 @@ const CORNERS = [
 
 const NEIGHBOR_OFFSETS = [[1, 0], [-1, 0], [0, 1], [0, -1]];
 
-// How long a disconnected player's seat stays warm before they're actually
-// removed from the room -- long enough to survive a page refresh or a
-// closed tab, without leaving stale seats forever.
+// How long a disconnected player's seat stays warm before the room is
+// actually cleaned up -- long enough to survive a page refresh or a
+// closed tab, without leaving an abandoned room around forever.
 const DISCONNECT_GRACE_MS = 5 * 60 * 1000;
 
 // A player is considered disconnected once their heartbeat goes quiet for
@@ -61,8 +63,7 @@ function createRoom(code) {
   return {
     code,
     status: "lobby", // lobby | playing | roundEnd | gameOver
-    hostId: null,
-    players: {}, // playerId -> player state
+    players: {}, // playerId -> player state (always exactly one entry)
     playerOrder: [],
     round: 0,
     keyword: null,
@@ -70,8 +71,7 @@ function createRoom(code) {
     grid: [],
     correctCount: 0,
     destination: null,
-    eatenCells: {}, // "col,row" -> { by, symbol, correct }, shared across the room
-    firstToFinishPlayerId: null, // reset every round
+    eatenCells: {}, // "col,row" -> { by, symbol, correct }
     gameStartedAt: null,
     gameEndedAt: null,
     roundStartedAt: null,
@@ -137,57 +137,18 @@ function addPlayer(room, playerId, username) {
     if (username) existing.username = username;
     return;
   }
-  if (room.status !== "lobby") throw new Error("Game already in progress");
   room.players[playerId] = makePlayer(playerId, username);
   room.playerOrder.push(playerId);
-  if (!room.hostId) room.hostId = playerId;
 }
 
-function reassignHostIfNeeded(room, departingId) {
-  if (room.hostId !== departingId) return;
-  room.hostId =
-    room.playerOrder.find((id) => id !== departingId && room.players[id] && room.players[id].connected) ||
-    room.playerOrder.find((id) => id !== departingId) ||
-    null;
-}
-
-// Full removal -- used for an explicit "leave" (Go Home), or once a
-// disconnect's grace period actually expires (see applyLazyStateUpdates).
+// Used for an explicit "leave" (Go Home), or once a disconnect's grace
+// period actually expires (see applyLazyStateUpdates) -- either way empties
+// the room, so the caller (LobbyManager's mutateRoom) deletes it afterward.
 function removePlayer(room, playerId) {
   const wasPresent = !!room.players[playerId];
   delete room.players[playerId];
   room.playerOrder = room.playerOrder.filter((id) => id !== playerId);
-  reassignHostIfNeeded(room, playerId);
-  if (wasPresent && room.status === "playing") {
-    // A departing player might have been the last one an in-progress round
-    // was waiting on, so re-check whether it can now advance.
-    maybeAdvanceRound(room);
-  }
   return wasPresent;
-}
-
-// ---- host controls ----
-
-// Lobby-only: once the game has started, players are mid-round (eaten
-// cells, lives, scores) and removal mid-game risks leaving that state
-// inconsistent -- a disruptive player can still be dealt with by waiting
-// for the round to end, or by the host restarting the game.
-function kickPlayer(room, requesterId, targetId) {
-  if (requesterId !== room.hostId) throw new Error("Only the host can remove a player.");
-  if (targetId === requesterId) throw new Error("You can't remove yourself -- use Go Home instead.");
-  if (room.status !== "lobby") throw new Error("Can't remove a player once the game has started.");
-  if (!room.players[targetId]) throw new Error("That player is no longer in the room.");
-  removePlayer(room, targetId);
-}
-
-// No status restriction (unlike kickPlayer) -- handing host to someone else
-// mid-game is harmless, since host-only actions (start/restart) aren't
-// reachable again until the game returns to the lobby anyway.
-function transferHost(room, requesterId, targetId) {
-  if (requesterId !== room.hostId) throw new Error("Only the host can transfer host.");
-  if (targetId === requesterId) return;
-  if (!room.players[targetId]) throw new Error("That player is no longer in the room.");
-  room.hostId = targetId;
 }
 
 // Sent every few seconds by a connected client -- there's no persistent
@@ -206,36 +167,18 @@ function heartbeat(room, playerId) {
 
 // ---- game lifecycle ----
 
-function startGame(room, requesterId) {
-  if (requesterId !== room.hostId) throw new Error("Only the host can start the game");
-  if (room.playerOrder.length === 0) throw new Error("Need at least one player");
+// Used both to start a brand-new game and to reset for "Play Again" -- the
+// two are the same operation (full reset, straight into round 1), so there's
+// no separate "lobby, waiting for the host to start" state to pass through.
+function beginGame(room) {
   room.status = "playing";
-  room.round = 0;
-  room.gameStartedAt = Date.now();
-  room.gameEndedAt = null;
-  room.roundFinalizedFor = -1;
-  room.analyticsSaved = false;
-  for (const id of room.playerOrder) {
-    const player = room.players[id];
-    player.score = 0;
-    player.lives = config.STARTING_LIVES;
-    player.eliminated = false;
-    player.matchLog = { rounds: [] };
-  }
-  nextRound(room);
-}
-
-function restartGame(room, requesterId) {
-  if (requesterId !== room.hostId) throw new Error("Only the host can restart the game");
-  room.status = "lobby";
   room.round = 0;
   room.keyword = null;
   room.keywordLabel = null;
   room.grid = [];
   room.destination = null;
   room.eatenCells = {};
-  room.firstToFinishPlayerId = null;
-  room.gameStartedAt = null;
+  room.gameStartedAt = Date.now();
   room.gameEndedAt = null;
   room.roundStartedAt = null;
   room.roundEndsAt = null;
@@ -257,6 +200,7 @@ function restartGame(room, requesterId) {
     player.currentRoundEntry = null;
     player.matchLog = { rounds: [] };
   }
+  nextRound(room);
 }
 
 function move(room, playerId, dir) {
@@ -286,12 +230,6 @@ function move(room, playerId, dir) {
 
 // ---- internals ----
 
-// Cells are shared across the whole room: the first player to munch one
-// resolves it (score/life, and it's removed from the board for everyone);
-// anyone who steps onto it afterward finds nothing there -- neither a
-// reward nor a penalty. Reaching the flag's *location* always counts even
-// if someone else already ate the emoji sitting on it, since the flag is a
-// place to reach, not a thing to eat.
 function resolveMunch(room, player) {
   const key = `${player.muncherCol},${player.muncherRow}`;
   const cell = room.grid[player.muncherRow * config.GRID_COLS + player.muncherCol];
@@ -304,9 +242,9 @@ function resolveMunch(room, player) {
   player.lastActionAt = now;
 
   const isDestination = !!room.destination && cell.col === room.destination.col && cell.row === room.destination.row;
-  const alreadyShared = Object.prototype.hasOwnProperty.call(room.eatenCells, key);
+  const alreadyEaten = Object.prototype.hasOwnProperty.call(room.eatenCells, key);
 
-  if (!alreadyShared) {
+  if (!alreadyEaten) {
     const correct = emojiRepository.isMatch(cell.symbol, room.keyword);
     room.eatenCells[key] = { by: player.id, symbol: cell.symbol, correct };
     player.eaten.push(key);
@@ -334,19 +272,11 @@ function resolveMunch(room, player) {
         scoreAfter: player.score,
       });
     }
-  } else if (!player.eaten.includes(key)) {
-    // Someone else got here first -- record it as visited (for this
-    // player's own analytics/slime trail) without touching score/lives.
-    player.eaten.push(key);
   }
 
   if (isDestination && !player.roundDone) {
     player.destinationReached = true;
     player.roundDone = true;
-    if (!room.firstToFinishPlayerId) {
-      room.firstToFinishPlayerId = player.id;
-      player.score += config.FIRST_TO_FLAG_BONUS;
-    }
   }
 }
 
@@ -410,7 +340,6 @@ function tierForRound(round, totalRounds) {
 function nextRound(room) {
   room.nextRoundAt = null;
   room.eatenCells = {};
-  room.firstToFinishPlayerId = null;
   room.round += 1;
 
   const active = activePlayers(room);
@@ -492,8 +421,8 @@ function nextRound(room) {
 // in-memory round entry (no DB write here -- that's the app layer's job,
 // once per completed game, guarded by room.analyticsSaved); guarded so it
 // never runs twice for the same round whether it ends naturally
-// (advanceAfterDelay) or abruptly (everyone eliminated mid-round, straight
-// into endGame).
+// (advanceAfterDelay) or abruptly (eliminated mid-round, straight into
+// endGame).
 function finalizeCurrentRoundLogs(room) {
   if (!room.roundStartedAt || room.roundFinalizedFor === room.round) return;
   room.roundFinalizedFor = room.round;
@@ -579,9 +508,7 @@ function applyLazyStateUpdates(room) {
     if (player && player.connected && now - (player.lastSeenAt || 0) > HEARTBEAT_TIMEOUT_MS) {
       player.connected = false;
       player.disconnectedAt = now;
-      reassignHostIfNeeded(room, id);
       changed = true;
-      if (room.status === "playing" && maybeAdvanceRound(room)) changed = true;
     }
   }
 
@@ -590,13 +517,9 @@ function applyLazyStateUpdates(room) {
     return player && !player.connected && player.disconnectedAt && now - player.disconnectedAt > DISCONNECT_GRACE_MS;
   });
   if (stale.length) {
-    for (const id of stale) {
-      reassignHostIfNeeded(room, id);
-      delete room.players[id];
-    }
+    for (const id of stale) delete room.players[id];
     room.playerOrder = room.playerOrder.filter((id) => !stale.includes(id));
     changed = true;
-    if (room.status === "playing" && maybeAdvanceRound(room)) changed = true;
   }
 
   return changed;
@@ -620,7 +543,6 @@ function publicPlayers(room) {
         roundDone: p.roundDone,
         eliminated: p.eliminated,
         connected: p.connected,
-        isHost: id === room.hostId,
       };
     })
     .filter(Boolean);
@@ -633,21 +555,14 @@ function publicSharedEaten(room) {
   });
 }
 
-function firstToFlagUsername(room) {
-  if (!room.firstToFinishPlayerId) return null;
-  const player = room.players[room.firstToFinishPlayerId];
-  return player ? player.username : null;
-}
-
-// Single envelope covering every screen (lobby, playing, roundEnd,
-// gameOver) -- polling always returns "the current full state" rather than
-// the several differently-shaped event payloads Socket.IO used to emit.
+// Single envelope covering every screen (playing, roundEnd, gameOver) --
+// polling always returns "the current full state" rather than several
+// differently-shaped event payloads.
 function toClientView(room) {
   return {
     code: room.code,
     version: room.version,
     status: room.status,
-    hostId: room.hostId,
     round: room.round,
     totalRounds: config.ROUND_COUNT,
     keyword: room.keyword,
@@ -662,7 +577,6 @@ function toClientView(room) {
     nextRoundAt: room.nextRoundAt,
     players: publicPlayers(room),
     sharedEaten: publicSharedEaten(room),
-    firstToFlag: firstToFlagUsername(room),
   };
 }
 
@@ -671,11 +585,8 @@ module.exports = {
   isEmpty,
   addPlayer,
   removePlayer,
-  kickPlayer,
-  transferHost,
   heartbeat,
-  startGame,
-  restartGame,
+  beginGame,
   move,
   applyLazyStateUpdates,
   toClientView,

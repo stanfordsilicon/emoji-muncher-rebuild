@@ -121,9 +121,6 @@ input {
   font-size: 18px;
 }
 input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 10px var(--accent-soft); }
-.row { display: flex; gap: 8px; margin-bottom: 6px; }
-.row input { flex: 1; }
-.row .btn { flex: 1; }
 .btn {
   padding: 11px 18px;
   border-radius: 4px;
@@ -146,10 +143,7 @@ input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 10px v
   font-weight: bold;
 }
 .btn.primary:hover { border-color: transparent; color: var(--bg-deep); filter: brightness(1.1); }
-.divider { color: var(--ink-soft); font-size: 13px; margin: 16px 0 10px; }
 .error { color: var(--orange); font-size: 14px; min-height: 18px; margin-top: 10px; }
-
-.code { color: var(--cyan); letter-spacing: 3px; text-shadow: 0 0 8px var(--cyan); }
 
 .back-to-launchpad {
   position: fixed;
@@ -184,26 +178,9 @@ input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 10px v
   font-size: 15px;
 }
 .player-list.small li { font-size: 14px; padding: 6px 10px; }
-.player-list .swatch { display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:8px; }
-
-.player-actions { display: flex; gap: 6px; flex-shrink: 0; }
-.player-action-btn {
-  padding: 4px 8px;
-  border-radius: 4px;
-  border: 1px solid var(--panel-line);
-  background: var(--bg-deep);
-  color: var(--ink-soft);
-  font-family: var(--pixel-font);
-  font-size: 8px;
-  letter-spacing: 0.03em;
-  cursor: pointer;
-  transition: border-color 0.15s ease, color 0.15s ease;
-}
-.player-action-btn:hover { border-color: var(--cyan); color: var(--cyan); }
-.player-action-btn.kick:hover { border-color: var(--orange); color: var(--orange); }
 
 /* ---- game screen ---- */
-#screen-game { align-items: flex-start; gap: 24px; flex-wrap: wrap; padding: 64px 12px 12px; }
+#screen-game { align-items: flex-start; padding: 64px 12px 12px; }
 /* max-width is set from JS (applyCellSize), sized off the board's actual
    column count -- it used to be hardcoded for a 7-column board here, which
    silently clipped the extra columns (including the flag's column) once
@@ -358,17 +335,13 @@ input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 10px v
 #touchpad button { font-size: 20px; border-radius: 8px; border: 2px solid var(--panel-line); background: var(--panel); color: var(--ink); }
 @media (max-width: 700px) { #touchpad { display: grid; } }
 
-#scoreboard { background: linear-gradient(180deg, var(--panel) 0%, #150a29 100%); border: 3px solid var(--panel-line); border-radius: 10px; padding: 14px 16px; min-width: 220px; }
-#scoreboard h3 { margin: 0 0 10px; font-family: var(--pixel-font); font-size: 11px; color: var(--accent); letter-spacing: 0.03em; }
-#scoreboardList { list-style: none; padding: 0; margin: 0; }
-#scoreboardList li {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 7px 4px; font-size: 15px; border-bottom: 1px solid var(--panel-line);
+.final-score {
+  font-family: var(--pixel-font);
+  font-size: 16px;
+  color: var(--accent);
+  text-shadow: 0 0 8px var(--accent-glow);
+  margin: 4px 0 18px;
 }
-#scoreboardList li .name { display: flex; align-items: center; gap: 8px; }
-#scoreboardList li .dot { width: 10px; height: 10px; border-radius: 50%; }
-#scoreboardList li .sb-shields { font-size: 12px; letter-spacing: 1px; }
-#scoreboardList li.eliminated { opacity: 0.45; text-decoration: line-through; }
 
 /* ---- onboarding ---- */
 .howto {
@@ -406,15 +379,6 @@ input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 10px v
   font-weight: 700;
   font-size: 14px;
   margin: -4px 0 10px;
-}
-
-.first-to-flag-note {
-  text-align: center;
-  color: var(--green);
-  font-weight: 700;
-  font-size: 14px;
-  margin: -4px 0 10px;
-  animation: bannerFade 2.6s ease forwards;
 }
 
 /* ---- accounts ---- */

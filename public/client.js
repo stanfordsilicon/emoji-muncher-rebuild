@@ -58,7 +58,6 @@
   // ---- screens ----
   const screens = {
     lobby: document.getElementById("screen-lobby"),
-    waiting: document.getElementById("screen-waiting"),
     game: document.getElementById("screen-game"),
     over: document.getElementById("screen-over"),
   };
@@ -96,7 +95,6 @@
 
   // ---- lobby screen ----
   const usernameInput = document.getElementById("username");
-  const roomCodeInput = document.getElementById("roomCode");
   const lobbyError = document.getElementById("lobbyError");
 
   function getUsername() {
@@ -112,7 +110,7 @@
     startHeartbeat();
   }
 
-  document.getElementById("createRoomBtn").addEventListener("click", async () => {
+  document.getElementById("playSoloBtn").addEventListener("click", async () => {
     const username = getUsername();
     if (!username) return;
     const res = await api("create-room", { username });
@@ -120,31 +118,13 @@
     enterRoom(res.room);
   });
 
-  document.getElementById("joinRoomBtn").addEventListener("click", async () => {
-    const username = getUsername();
-    if (!username) return;
-    const code = roomCodeInput.value.trim().toUpperCase();
-    if (!code) return showError(lobbyError, t("room_code_required_error"));
-    const res = await api("join-room", { username, code });
-    if (!res.ok) return showError(lobbyError, res.error);
-    enterRoom(res.room);
-  });
-
-  // Skips the waiting-room/share-code step entirely -- a private room,
-  // started immediately with just this player. Deliberately never carries
-  // an arcade room code even when one is present: choosing solo means
-  // opting out of the shared party for this game, not joining it solo.
-  document.getElementById("playSoloBtn").addEventListener("click", async () => {
-    const username = getUsername();
-    if (!username) return;
-    const res = await api("create-room", { username, solo: true });
-    if (!res.ok) return showError(lobbyError, res.error);
-    enterRoom(res.room);
-  });
-
-  // ---- QMoji Arcade: party continuity from the homescreen ----
+  // ---- QMoji Arcade: return-to-launchpad continuity ----
   // Enhancement only — if there's no ?room= or the lookup fails, none of
   // this runs and the lobby above behaves exactly as it does standalone.
+  // Munchers itself is single-player, so arriving via a shared arcade party
+  // doesn't join a shared game here -- it just prefills the player's name
+  // (if the arcade already knows it) and preserves the room/lang/player
+  // params so "Return to Launch Pad" lands them back in the same party.
   const backToLaunchpadBtn = document.getElementById("backToLaunchpadBtn");
   let arcadeRoomCode = null;
   let arcadeLang = null;
@@ -179,102 +159,9 @@
     arcadeLang = arcade.lang;
     arcadePlayerId = arcade.playerId;
 
-    // The room code is fixed by the party the player already formed on the
-    // homescreen — one code, sourced from the URL, not a second manual entry.
-    roomCodeInput.value = arcadeRoomCode;
-    roomCodeInput.disabled = true;
-    document.querySelector(".divider").textContent = t("joining_party", { code: arcadeRoomCode });
-    document.getElementById("createRoomBtn").classList.add("hidden");
-
     const me = (arcade.room.players || []).find((p) => p.playerId === arcadePlayerId);
-
-    if (me) {
-      // Known party member — skip the manual entry screen entirely.
-      usernameInput.value = me.name;
-      const res = await api("join-room", { username: me.name, code: arcadeRoomCode });
-      if (res.ok) {
-        enterRoom(res.room);
-        return;
-      }
-      if (res.error === "Room not found") {
-        // First arcade player to reach this game — seed a room under the
-        // party's own code instead of letting the server generate one.
-        const created = await api("create-room", { username: me.name, code: arcadeRoomCode });
-        if (created.ok) enterRoom(created.room);
-      }
-    } else {
-      // A raw game link was opened directly (not routed through the
-      // homescreen) — let them type a name as usual, but also enroll them
-      // in the arcade party so it carries forward from here too.
-      const joinBtn = document.getElementById("joinRoomBtn");
-      joinBtn.textContent = t("join_party_button");
-      joinBtn.addEventListener("click", () => {
-        const name = usernameInput.value.trim();
-        if (name) QMojiArcade.joinRoom(arcadeRoomCode, name).catch(() => {});
-      });
-    }
+    if (me) usernameInput.value = me.name;
   })();
-
-  // ---- waiting room ----
-  const waitingCode = document.getElementById("waitingCode");
-  const waitingPlayers = document.getElementById("waitingPlayers");
-  const waitingHint = document.getElementById("waitingHint");
-  const startGameBtn = document.getElementById("startGameBtn");
-
-  startGameBtn.addEventListener("click", async () => {
-    const res = await api("start-game", {});
-    if (!res.ok) return showError(waitingHint, res.error);
-    applySnapshotIfFresh(res.room);
-  });
-
-  function renderWaitingRoom(view) {
-    showScreen("waiting");
-    waitingCode.textContent = view.code;
-    waitingPlayers.innerHTML = "";
-    const amHost = view.players.some((p) => p.playerId === myId && p.isHost);
-    for (const p of view.players) {
-      const li = document.createElement("li");
-      const nameEl = document.createElement("span");
-      nameEl.innerHTML = `<span class="swatch" style="background:${colorFor(p.playerId)}"></span>${escapeHtml(p.username)}${p.isHost ? " " + t("host_suffix") : ""}`;
-      li.appendChild(nameEl);
-
-      // Host-only controls for every OTHER player in the room -- kicking
-      // yourself would just be leaving, and transferring host to yourself
-      // is a no-op, so neither button is shown on the host's own row.
-      if (amHost && p.playerId !== myId) {
-        const actions = document.createElement("span");
-        actions.className = "player-actions";
-
-        const makeHostBtn = document.createElement("button");
-        makeHostBtn.type = "button";
-        makeHostBtn.className = "player-action-btn";
-        makeHostBtn.textContent = t("make_host_button");
-        makeHostBtn.addEventListener("click", async () => {
-          const res = await api("transfer-host", { targetId: p.playerId });
-          if (res.ok) applySnapshotIfFresh(res.room);
-        });
-        actions.appendChild(makeHostBtn);
-
-        const kickBtn = document.createElement("button");
-        kickBtn.type = "button";
-        kickBtn.className = "player-action-btn kick";
-        kickBtn.textContent = t("kick_button");
-        kickBtn.addEventListener("click", async () => {
-          if (!window.confirm(t("kick_confirm", { name: p.username }))) return;
-          const res = await api("kick-player", { targetId: p.playerId });
-          if (res.ok) applySnapshotIfFresh(res.room);
-        });
-        actions.appendChild(kickBtn);
-
-        li.appendChild(actions);
-      }
-
-      waitingPlayers.appendChild(li);
-    }
-    startGameBtn.classList.toggle("hidden", !amHost);
-    waitingHint.textContent = amHost ? "" : t("waiting_for_host");
-    lastPlayers = view.players;
-  }
 
   // ---- game screen ----
   const boardEl = document.getElementById("board");
@@ -283,11 +170,9 @@
   const roundInfoEl = document.getElementById("roundInfo");
   const timerFillEl = document.getElementById("timerFill");
   const nextRoundNoteEl = document.getElementById("nextRoundNote");
-  const firstToFlagNoteEl = document.getElementById("firstToFlagNote");
   const roundOneBannerEl = document.getElementById("roundOneBanner");
   const myScoreValEl = document.getElementById("myScoreVal");
   const myLivesEl = document.getElementById("myLives");
-  const scoreboardListEl = document.getElementById("scoreboardList");
 
   let cellSize = 58;
   let cols = 9, rows = 7;
@@ -348,8 +233,7 @@
     }, 150);
   });
 
-  // ---- go home (available in-game and post-game; deliberately absent from
-  // the waiting-room screen so players can't slip out of an active lobby) ----
+  // ---- go home (available in-game and post-game) ----
   async function goHome() {
     await api("leave-room", {});
     stopPolling();
@@ -361,29 +245,10 @@
     muncherEls.clear();
     animatingKeys.clear();
     myPrev = null;
-    roomCodeInput.value = "";
     showScreen("lobby");
   }
   document.getElementById("homeBtnGame").addEventListener("click", goHome);
   document.getElementById("homeBtnOver").addEventListener("click", goHome);
-
-  // Same reset as goHome(), minus the leave-room call (we're already out
-  // server-side -- that's how this got triggered), plus a visible reason so
-  // it doesn't look like the room just silently vanished.
-  function handleKicked() {
-    stopPolling();
-    stopHeartbeat();
-    currentRoomCode = null;
-    lastRoomView = null;
-    colorByPlayer.clear();
-    cellEls.clear();
-    muncherEls.clear();
-    animatingKeys.clear();
-    myPrev = null;
-    roomCodeInput.value = "";
-    showScreen("lobby");
-    showError(lobbyError, t("kicked_from_room"));
-  }
 
   // Explicit "leaving right now" signal for the common case (closing the
   // tab) — sendBeacon is used because a plain fetch can get cancelled
@@ -513,18 +378,6 @@
     }
   }
 
-  let announcedFirstToFlag = null;
-  function announceFirstToFlag(username) {
-    if (!username || username === announcedFirstToFlag) return;
-    announcedFirstToFlag = username;
-    const mine = lastPlayers.find((p) => p.playerId === myId)?.username === username;
-    firstToFlagNoteEl.textContent = t("first_to_flag", { who: mine ? t("first_to_flag_you") : username });
-    firstToFlagNoteEl.classList.remove("hidden");
-    firstToFlagNoteEl.style.animation = "none";
-    void firstToFlagNoteEl.offsetWidth;
-    firstToFlagNoteEl.style.animation = "";
-  }
-
   // Sends the eaten emoji flying from its cell over to the lives chip and
   // cracks the shield it "hits", instead of the cell just quietly vanishing.
   function flyToShield(cellEl, shieldEl) {
@@ -613,24 +466,9 @@
     myPrev = { score: me.score, lives: me.lives, eaten: eatenSet };
   }
 
-  function renderScoreboard(players) {
-    const sorted = [...players].sort((a, b) => b.score - a.score);
-    scoreboardListEl.innerHTML = "";
-    for (const p of sorted) {
-      const li = document.createElement("li");
-      if (p.eliminated) li.classList.add("eliminated");
-      li.innerHTML = `
-        <span class="name"><span class="dot" style="background:${colorFor(p.playerId)}"></span>${escapeHtml(p.username)}${p.playerId === myId ? " " + t("you_suffix") : ""}</span>
-        <span>💯 ${p.score}${p.eliminated ? "" : " &nbsp; " + shieldRow(p.lives, startingLives, true)}</span>`;
-      scoreboardListEl.appendChild(li);
-    }
-  }
-
   function applyRoundStart(view) {
     showScreen("game");
     hideNextRoundCountdown();
-    firstToFlagNoteEl.classList.add("hidden");
-    announcedFirstToFlag = null;
     roundInfoEl.textContent = t("round_progress", { round: view.round, total: view.totalRounds });
     keywordEl.textContent = view.keywordLabel || view.keyword;
     renderGrid(view);
@@ -638,7 +476,6 @@
     renderMunchers(view.players);
     syncMyBoard(view.players);
     applySharedEaten(view.sharedEaten || []);
-    renderScoreboard(view.players);
     startTimer(view.timeLimitMs);
     window.SFX.roundStart();
 
@@ -660,23 +497,18 @@
     renderMunchers(view.players);
     syncMyBoard(view.players);
     applySharedEaten(view.sharedEaten || []);
-    renderScoreboard(view.players);
-    announceFirstToFlag(view.firstToFlag);
   }
 
   function applyRoundEnd(view) {
     lastPlayers = view.players;
     applySharedEaten(view.sharedEaten || []);
-    renderScoreboard(view.players);
-    announceFirstToFlag(view.firstToFlag);
     freezeTimer();
     updateNextRoundCountdown(view);
   }
 
-  const finalScoreboardEl = document.getElementById("finalScoreboard");
+  const finalScoreEl = document.getElementById("finalScore");
   const leaderboardListEl = document.getElementById("leaderboardList");
   const playAgainBtn = document.getElementById("playAgainBtn");
-  const overHint = document.getElementById("overHint");
 
   playAgainBtn.addEventListener("click", async () => {
     const res = await api("restart-game", {});
@@ -701,17 +533,9 @@
     showScreen("over");
     window.SFX.gameOver();
     lastPlayers = view.players;
-    const sorted = [...view.players].sort((a, b) => b.score - a.score);
-    finalScoreboardEl.innerHTML = "";
-    sorted.forEach((p, i) => {
-      const li = document.createElement("li");
-      li.innerHTML = `<span><span class="swatch" style="background:${colorFor(p.playerId)}"></span>#${i + 1} ${escapeHtml(p.username)}${p.playerId === myId ? " " + t("you_suffix") : ""}</span><span>💯 ${p.score}</span>`;
-      finalScoreboardEl.appendChild(li);
-    });
-    loadAllTimeLeaderboard();
     const me = view.players.find((p) => p.playerId === myId);
-    playAgainBtn.classList.toggle("hidden", !(me && me.isHost));
-    overHint.textContent = me && me.isHost ? "" : t("waiting_for_new_game");
+    finalScoreEl.textContent = t("final_score", { score: me ? me.score : 0 });
+    loadAllTimeLeaderboard();
   }
 
   // A move's own POST response and the background poller both resolve
@@ -738,19 +562,6 @@
   let appliedVersion = -1;
   function applySnapshotIfFresh(view) {
     if (typeof view.version === "number" && view.version < appliedVersion) return;
-
-    // Detects being kicked: we were previously confirmed in this room
-    // (lastRoomView exists), but this fresher snapshot's player list no
-    // longer includes us. The only path that removes a still-polling
-    // player from the array like this is the host's kick action -- an
-    // explicit "leave" already tears down polling locally first, and a
-    // dropped connection just flips connected=false without removing the
-    // seat. Checked before the version-freshness bookkeeping below so a
-    // stale-looking response can't hide a real kick.
-    if (lastRoomView && currentRoomCode && Array.isArray(view.players) && !view.players.some((p) => p.playerId === myId)) {
-      handleKicked();
-      return;
-    }
 
     appliedVersion = view.version;
 
@@ -781,20 +592,18 @@
   }
 
   // ---- room snapshot dispatch ----
-  // Every poll tick and every action response hands over a full room
-  // snapshot; this decides which screen it implies and whether it's a
-  // meaningfully new state (a fresh round, fresh results) or just the same
-  // one with a minor change (a move, a reveal, a roster update) so the game
-  // screen doesn't reset the grid/timer/animations on every poll.
+  // Every poll tick and every action response hands over a full snapshot of
+  // this player's game; this decides which screen it implies and whether
+  // it's a meaningfully new state (a fresh round, fresh results) or just the
+  // same one with a minor change (a move, a reveal) so the game screen
+  // doesn't reset the grid/timer/animations on every poll. Games always
+  // start already "playing" (see LobbyManager.createGame) -- there's no
+  // "lobby" status the client ever needs to render.
   let lastRoomView = null;
   function applyRoomSnapshot(view) {
     const prev = lastRoomView;
     lastRoomView = view;
 
-    if (view.status === "lobby") {
-      renderWaitingRoom(view);
-      return;
-    }
     if (view.status === "playing") {
       const isNewRound = !prev || prev.status !== "playing" || prev.round !== view.round;
       if (isNewRound) applyRoundStart(view);

@@ -19,7 +19,6 @@ module.exports = {
   MOVE_COOLDOWN_MS: num("MOVE_COOLDOWN_MS", 0),
   STARTING_LIVES: num("STARTING_LIVES", 3),
   POINTS_PER_CORRECT: num("POINTS_PER_CORRECT", 10),
-  FIRST_TO_FLAG_BONUS: num("FIRST_TO_FLAG_BONUS", 50),
   // A keyword with only a handful of matching symbols forces the grid
   // generator to repeat those same few symbols dozens of times to fill out
   // safe paths (e.g. a 3-match keyword can end up "safe" on 40+ of 63
@@ -30,5 +29,4 @@ module.exports = {
   // guard against future concept data ever shipping a thinner cluster,
   // rather than something that filters anything out today.
   MIN_MATCHES_PER_KEYWORD: num("MIN_MATCHES_PER_KEYWORD", 10),
-  ROOM_CODE_LENGTH: num("ROOM_CODE_LENGTH", 4),
 };

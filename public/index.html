@@ -28,37 +28,16 @@
 <section id="screen-lobby" class="screen">
   <div class="panel">
     <h1 data-i18n="app_title">😋 Emoji Munchers</h1>
-    <p class="tag" data-i18n="app_tagline">Munch every emoji that matches the keyword. Multiplayer, same board, your own score.</p>
+    <p class="tag" data-i18n="app_tagline">Munch every emoji that matches the keyword. The rest cost a life.</p>
 
     <label class="field">
       <span data-i18n="username_label">Username</span>
       <input id="username" maxlength="20" data-i18n-placeholder="username_placeholder" placeholder="e.g. sid" autocomplete="off">
     </label>
 
-    <div class="row">
-      <button id="createRoomBtn" class="btn primary" data-i18n="create_room_button">Create Room</button>
-      <button id="playSoloBtn" class="btn" data-i18n="play_solo_button">Play Solo</button>
-    </div>
-
-    <div class="divider" data-i18n="divider_join">or join a room</div>
-
-    <div class="row">
-      <input id="roomCode" maxlength="4" data-i18n-placeholder="room_code_placeholder" placeholder="ROOM CODE" autocomplete="off" style="text-transform:uppercase">
-      <button id="joinRoomBtn" class="btn" data-i18n="join_button">Join</button>
-    </div>
+    <button id="playSoloBtn" class="btn primary" data-i18n="play_button">Play</button>
 
     <p id="lobbyError" class="error"></p>
-  </div>
-</section>
-
-<!-- ============ WAITING ROOM ============ -->
-<section id="screen-waiting" class="screen hidden">
-  <div class="panel">
-    <h2><span data-i18n="waiting_room_title">Room</span> <span id="waitingCode" class="code"></span></h2>
-    <p class="tag" data-i18n="waiting_room_hint">Share this code — everyone plays the same board.</p>
-    <ul id="waitingPlayers" class="player-list"></ul>
-    <button id="startGameBtn" class="btn primary hidden" data-i18n="start_game_button">Start Game</button>
-    <p id="waitingHint" class="tag"></p>
   </div>
 </section>
 
@@ -76,7 +55,6 @@
       Eat emojis that match the keyword — the rest cost a life. Race to the 🚩!
     </div>
     <div id="timerBar"><div id="timerFill"></div></div>
-    <div id="firstToFlagNote" class="first-to-flag-note hidden"></div>
     <div id="nextRoundNote" class="next-round-note hidden"></div>
     <div id="boardWrap">
       <div id="board"></div>
@@ -91,22 +69,17 @@
       <button data-dir="left">◀</button><button data-dir="down">▼</button><button data-dir="right">▶</button>
     </div>
   </div>
-  <aside id="scoreboard">
-    <h3 data-i18n="scoreboard_heading">Scoreboard</h3>
-    <ul id="scoreboardList"></ul>
-  </aside>
 </section>
 
 <!-- ============ GAME OVER SCREEN ============ -->
 <section id="screen-over" class="screen hidden">
   <div class="panel">
     <h2 data-i18n="game_over_title">Game Over</h2>
-    <ul id="finalScoreboard" class="player-list"></ul>
+    <p class="final-score" id="finalScore"></p>
     <h3 data-i18n="all_time_leaderboard_heading">All-time leaderboard</h3>
     <ul id="leaderboardList" class="player-list small"></ul>
-    <button id="playAgainBtn" class="btn primary hidden" data-i18n="play_again_button">Play Again</button>
+    <button id="playAgainBtn" class="btn primary" data-i18n="play_again_button">Play Again</button>
     <button id="homeBtnOver" class="btn" data-i18n="home_button">🏠 Home</button>
-    <p id="overHint" class="tag"></p>
   </div>
 </section>
 

@@ -123,7 +123,6 @@ async function saveGameSessionAnalytics(room) {
     const gameEndedAt = room.gameEndedAt ? new Date(room.gameEndedAt) : new Date();
     const totalDurationMs = room.gameStartedAt ? gameEndedAt.getTime() - room.gameStartedAt : null;
     const players = Object.values(room.players);
-    const allUsernames = players.map((p) => p.username);
 
     for (const player of players) {
       await scoreRepository.recordMatchResult(player.username, player.score);
@@ -139,7 +138,6 @@ async function saveGameSessionAnalytics(room) {
         finalScore: player.score,
         finalLives: player.lives,
         eliminated: player.eliminated,
-        otherPlayers: allUsernames.filter((u) => u !== player.username),
       });
     }
   } catch (err) {
@@ -154,11 +152,12 @@ function maybeSaveAnalytics(room) {
   }
 }
 
-// ---- rooms ----
+// ---- game (single-player: a "room" is always exactly one player, keyed by
+// their own id -- see LobbyManager.js) ----
 
 app.post("/api/create-room", async (req, res) => {
   try {
-    const { username, playerId, code: requestedCode, solo, token } = req.body || {};
+    const { username, playerId, token } = req.body || {};
     const id = normId(playerId);
     const name = String(username || "").trim().slice(0, 20);
     if (!id) return res.json({ ok: false, error: "Missing player id." });
@@ -167,47 +166,9 @@ app.post("/api/create-room", async (req, res) => {
     if (await isNameOwnedByAnother(authedUsername, name)) {
       return res.json({ ok: false, error: "That name is taken — sign in or pick another." });
     }
-    // requestedCode arrives when QMoji 2.0 launched this game with a party
-    // already formed — the arcade room's code becomes this game's room code
-    // too (a substitution, not a second, parallel room-code system).
-    let room = requestedCode
-      ? await lobbyManager.createRoomWithCode(requestedCode, id, name)
-      : await lobbyManager.createRoom(id, name);
+    const room = await lobbyManager.createGame(id, name);
     scoreRepository.upsertPlayer(name);
-    // "Play Solo" skips the waiting-room/share-code step entirely -- the
-    // host is the only player, so start immediately.
-    if (solo) room = await lobbyManager.startGame(room.code, id);
     maybeSaveAnalytics(room);
-    res.json({ ok: true, room: GameRoom.toClientView(room) });
-  } catch (err) {
-    res.json({ ok: false, error: err.message });
-  }
-});
-
-app.post("/api/join-room", async (req, res) => {
-  try {
-    const { username, code, playerId, token } = req.body || {};
-    const id = normId(playerId);
-    const name = String(username || "").trim().slice(0, 20);
-    if (!id) return res.json({ ok: false, error: "Missing player id." });
-    if (!name) return res.json({ ok: false, error: "Enter a username first." });
-    if (!code) return res.json({ ok: false, error: "Enter a room code." });
-    const authedUsername = token ? await sessionStore.resolve(token) : null;
-    if (await isNameOwnedByAnother(authedUsername, name)) {
-      return res.json({ ok: false, error: "That name is taken — sign in or pick another." });
-    }
-    const room = await lobbyManager.joinRoom(normCode(code), id, name);
-    scoreRepository.upsertPlayer(name);
-    res.json({ ok: true, room: GameRoom.toClientView(room) });
-  } catch (err) {
-    res.json({ ok: false, error: err.message });
-  }
-});
-
-app.post("/api/start-game", async (req, res) => {
-  try {
-    const { code, playerId } = req.body || {};
-    const room = await lobbyManager.startGame(normCode(code), normId(playerId));
     res.json({ ok: true, room: GameRoom.toClientView(room) });
   } catch (err) {
     res.json({ ok: false, error: err.message });
@@ -216,8 +177,8 @@ app.post("/api/start-game", async (req, res) => {
 
 app.post("/api/restart-game", async (req, res) => {
   try {
-    const { code, playerId } = req.body || {};
-    const room = await lobbyManager.restartGame(normCode(code), normId(playerId));
+    const { playerId } = req.body || {};
+    const room = await lobbyManager.restartGame(normId(playerId));
     res.json({ ok: true, room: GameRoom.toClientView(room) });
   } catch (err) {
     res.json({ ok: false, error: err.message });
@@ -226,8 +187,8 @@ app.post("/api/restart-game", async (req, res) => {
 
 app.post("/api/move", async (req, res) => {
   try {
-    const { code, playerId, dir } = req.body || {};
-    const room = await lobbyManager.move(normCode(code), normId(playerId), dir);
+    const { playerId, dir } = req.body || {};
+    const room = await lobbyManager.move(normId(playerId), dir);
     if (!room) return res.json({ ok: false, error: "Room not found." });
     maybeSaveAnalytics(room);
     res.json({ ok: true, room: GameRoom.toClientView(room) });
@@ -242,57 +203,31 @@ app.post("/api/move", async (req, res) => {
 // actually detected).
 app.post("/api/heartbeat", async (req, res) => {
   try {
-    const { code, playerId } = req.body || {};
-    await lobbyManager.heartbeat(normCode(code), normId(playerId));
+    const { playerId } = req.body || {};
+    await lobbyManager.heartbeat(normId(playerId));
     res.json({ ok: true });
   } catch (err) {
     res.json({ ok: false, error: err.message });
   }
 });
 
-// Explicit "go home" from inside a game or off the game-over screen. Note
-// there is no equivalent path out of the waiting room by design -- the
-// client simply never offers this button while status is "lobby".
+// Explicit "go home" from inside a game or off the game-over screen.
 app.post("/api/leave-room", async (req, res) => {
   try {
-    const { code, playerId } = req.body || {};
-    await lobbyManager.leaveRoom(normCode(code), normId(playerId));
+    const { playerId } = req.body || {};
+    await lobbyManager.leaveRoom(normId(playerId));
     res.json({ ok: true });
   } catch (err) {
     res.json({ ok: false, error: err.message });
   }
 });
 
-// Host-only, lobby-only -- see GameRoom.kickPlayer for why kicking is
-// restricted to before the game starts.
-app.post("/api/kick-player", async (req, res) => {
-  try {
-    const { code, playerId, targetId } = req.body || {};
-    const room = await lobbyManager.kickPlayer(normCode(code), normId(playerId), normId(targetId));
-    res.json({ ok: true, room: GameRoom.toClientView(room) });
-  } catch (err) {
-    res.json({ ok: false, error: err.message });
-  }
-});
-
-// Host-only. Unlike kick-player, this works at any room status.
-app.post("/api/transfer-host", async (req, res) => {
-  try {
-    const { code, playerId, targetId } = req.body || {};
-    const room = await lobbyManager.transferHost(normCode(code), normId(playerId), normId(targetId));
-    res.json({ ok: true, room: GameRoom.toClientView(room) });
-  } catch (err) {
-    res.json({ ok: false, error: err.message });
-  }
-});
-
-// Polling endpoint — replaces the old lobby_state/round_start/state_update/
-// round_end/game_over socket broadcasts. Every response is the full
-// authoritative room snapshot, same as those broadcasts always were.
+// Polling endpoint — every response is the full authoritative game
+// snapshot for this player.
 app.get("/api/room", async (req, res) => {
   try {
     const code = normCode(req.query.code);
-    if (!code) return res.status(400).json({ ok: false, error: "Missing room code." });
+    if (!code) return res.status(400).json({ ok: false, error: "Missing player id." });
     const room = await lobbyManager.getRoom(code);
     if (!room) return res.json({ ok: true, room: null });
     maybeSaveAnalytics(room);

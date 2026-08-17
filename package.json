@@ -1,7 +1,7 @@
 {
   "name": "emoji-munchers",
   "version": "1.0.0",
-  "description": "Multiplayer emoji-keyword munching game.",
+  "description": "Single-player emoji-keyword munching game.",
   "main": "server/server.js",
   "scripts": {
     "start": "node server/server.js",
