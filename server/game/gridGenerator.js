@@ -172,24 +172,82 @@ function isReachable(blob, from, to, cols, rows) {
   return isConnectedWithinBlobExcluding(blob, from, to, null, cols, rows);
 }
 
+// A pattern's real (main-path) route stays a single non-branching corridor
+// per corner -- but a corridor with zero forks anywhere on the board reads
+// as an obvious, un-maze-like straight shot. This branches a short dead-end
+// off a random interior point of that path into previously-unused cells:
+// safe-looking territory that doesn't reconnect to anything and doesn't
+// reach the destination, so wandering down one means backtracking rather
+// than finding a real shortcut. Never touches the main path itself, so it
+// can never turn a solvable board into an unsolvable one.
+function addDeadEndSpur(blob, mainPath, cols, rows) {
+  if (mainPath.length < 3) return;
+  let cur = mainPath[1 + Math.floor(Math.random() * (mainPath.length - 2))];
+  const spurLength = 2 + Math.floor(Math.random() * 3); // 2-4 cells
+  const spurCells = [];
+  for (let step = 0; step < spurLength; step++) {
+    const candidates = neighborsOf(cur, cols, rows).filter((nb) => {
+      const k = key(nb.col, nb.row);
+      return !blob.has(k) && !spurCells.some((c) => c.col === nb.col && c.row === nb.row);
+    });
+    if (candidates.length === 0) break;
+    cur = candidates[Math.floor(Math.random() * candidates.length)];
+    spurCells.push(cur);
+  }
+  for (const cell of spurCells) blob.set(key(cell.col, cell.row), cell);
+}
+
+const SPURS_PER_CORNER_MIN = 1;
+const SPURS_PER_CORNER_MAX = 2;
+
 /**
- * Builds the safe region for one round: exactly one self-avoiding walk from
- * each spawn corner to the destination, unioned together. Deliberately no
- * second path and no chokepoint-bypass repair -- a single non-branching
- * route per corner is the actual design goal (a real maze, not an open
- * lawn with a backup route), so a fragile chokepoint is a feature here, not
- * something to patch around.
+ * Builds one full board-layout pattern: a single self-avoiding main path
+ * from every spawn corner to a shared destination, plus a couple of
+ * dead-end spurs per corner branching off that path. Returns null if any
+ * corner's main path can't be built or the resulting board somehow isn't
+ * solvable for every corner -- the caller (getPatternPool) just tries
+ * again, since this only runs at pool-build time, not per round.
  */
-function buildSafeRegion(cols, rows, destination) {
+function buildPattern(cols, rows) {
+  const destination = pickDestination(cols, rows);
   const blob = new Map([[key(destination.col, destination.row), destination]]);
   const corners = spawnCorners(cols, rows);
 
   for (const corner of corners) {
-    const walk = selfAvoidingWalk(cols, rows, corner, destination) || pathBetween(corner, destination, true);
+    const walk = selfAvoidingWalk(cols, rows, corner, destination);
+    if (!walk) return null;
     for (const cell of walk) blob.set(key(cell.col, cell.row), cell);
+    const spurCount = SPURS_PER_CORNER_MIN + Math.floor(Math.random() * (SPURS_PER_CORNER_MAX - SPURS_PER_CORNER_MIN + 1));
+    for (let i = 0; i < spurCount; i++) addDeadEndSpur(blob, walk, cols, rows);
   }
 
-  return { blob, corners };
+  if (!corners.every((corner) => isReachable(blob, corner, destination, cols, rows))) return null;
+  return { destination, blob, corners };
+}
+
+// ~100-200 predefined board layouts per the Week 8 CSV ("Redesign Emoji
+// Munchers board generation"), built once per (cols, rows) the first time
+// that size is actually requested rather than regenerated fresh every
+// round -- board SHAPE quality is fixed and validated at pool-build time,
+// and a round just draws a random member instead of walking a brand new
+// maze from scratch each time. Emoji content is still assigned fresh per
+// round in generateRound(), so the same layout reappearing across rounds or
+// games doesn't mean the same-looking board.
+const PATTERN_POOL_SIZE = 150;
+const patternPoolCache = new Map();
+function getPatternPool(cols, rows) {
+  const cacheKey = `${cols}x${rows}`;
+  let pool = patternPoolCache.get(cacheKey);
+  if (pool) return pool;
+
+  pool = [];
+  const maxBuildAttempts = PATTERN_POOL_SIZE * 4;
+  for (let attempts = 0; pool.length < PATTERN_POOL_SIZE && attempts < maxBuildAttempts; attempts++) {
+    const pattern = buildPattern(cols, rows);
+    if (pattern) pool.push(pattern);
+  }
+  patternPoolCache.set(cacheKey, pool);
+  return pool;
 }
 
 /**
@@ -260,40 +318,31 @@ function computeDifficultyStats(grid, keyword, emojiRepository, cols, rows) {
  * that same tier's sibling clusters instead of the whole emoji universe, so
  * wrong cells get genuinely harder to distinguish, not just more numerous.
  *
- * Solvability is a round-level property, not a per-corner one: every spawn
- * corner must have a confirmed safe route to the destination before the
- * round ships. buildSafeRegion() is retried (each attempt re-walking from
- * scratch) until every corner passes isReachable(), or a bounded number of
- * attempts is exhausted -- in which case a guaranteed-connected fallback
- * (plain Manhattan paths from every corner) is used instead. Either way, a
- * round is never solvable for some players' spawn corners and not others.
+ * The board SHAPE comes from a random member of the pre-generated pattern
+ * pool (see getPatternPool) -- every pattern in that pool was already
+ * validated solvable for every corner when the pool was built, so there's
+ * no per-round retry loop here anymore. Only the pool itself (built once,
+ * lazily, per grid size) needs that validation.
  */
 function generateRound(emojiRepository, { cols, rows, minMatches, difficultyTier }) {
   const keyword = emojiRepository.pickKeyword(minMatches, difficultyTier);
   const matchingSymbols = emojiRepository.getMatchingSymbols(keyword);
   const wrongSymbols = emojiRepository.getWrongSymbolPool(keyword);
 
-  const MAX_ROUND_ATTEMPTS = 8;
   let destination = pickDestination(cols, rows);
   let blob = new Map([[key(destination.col, destination.row), destination]]);
 
   if (matchingSymbols.length > 0) {
-    let solved = false;
-    for (let attempt = 0; attempt < MAX_ROUND_ATTEMPTS; attempt++) {
-      destination = pickDestination(cols, rows);
-      const built = buildSafeRegion(cols, rows, destination);
-      if (built.corners.every((corner) => isReachable(built.blob, corner, destination, cols, rows))) {
-        blob = built.blob;
-        solved = true;
-        break;
-      }
-    }
-
-    if (!solved) {
-      // Retries exhausted -- fall back to a deterministic construction that's
-      // connected for every corner by definition, rather than ship a board
-      // that was never actually validated.
-      blob = new Map([[key(destination.col, destination.row), destination]]);
+    const pool = getPatternPool(cols, rows);
+    if (pool.length > 0) {
+      const picked = pool[Math.floor(Math.random() * pool.length)];
+      destination = picked.destination;
+      blob = picked.blob;
+    } else {
+      // Pool somehow came up empty (a pathologically small/odd grid size) --
+      // fall back to a deterministic construction that's connected for
+      // every corner by definition, rather than ship a board that was never
+      // actually validated.
       for (const corner of spawnCorners(cols, rows)) {
         const path = pathBetween(corner, destination, true);
         for (const cell of path) blob.set(key(cell.col, cell.row), cell);

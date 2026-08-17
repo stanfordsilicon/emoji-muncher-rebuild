@@ -24,8 +24,11 @@ module.exports = {
   // generator to repeat those same few symbols dozens of times to fill out
   // safe paths (e.g. a 3-match keyword can end up "safe" on 40+ of 63
   // cells) -- trivially easy, since almost everything on the board is safe
-  // to eat. Raised from 3 to keep rounds themed around keywords with real
-  // symbol variety instead.
-  MIN_MATCHES_PER_KEYWORD: num("MIN_MATCHES_PER_KEYWORD", 8),
+  // to eat. Matches the Week 8 CSV's "roughly 10-15 emoji" viability target;
+  // ConceptRepository (see server/data/ConceptRepository.js) already ships
+  // every concept with exactly 10 ranked members, so this floor is really a
+  // guard against future concept data ever shipping a thinner cluster,
+  // rather than something that filters anything out today.
+  MIN_MATCHES_PER_KEYWORD: num("MIN_MATCHES_PER_KEYWORD", 10),
   ROOM_CODE_LENGTH: num("ROOM_CODE_LENGTH", 4),
 };
