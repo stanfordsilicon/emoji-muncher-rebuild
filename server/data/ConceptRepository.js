@@ -74,9 +74,15 @@ class ConceptRepository {
     return this.getMatchingSymbols(keyword).includes(symbol);
   }
 
+  // Restricted to a single word rather than the full cluster label (e.g.
+  // "Colorful Hearts" -> "Hearts") -- every label in conceptClusters.json
+  // is a short noun phrase that ends in its head noun, so the last word
+  // alone stays a clear, correct prompt on its own.
   getKeywordLabel(keyword) {
     const concept = this._byKeyword.get(keyword);
-    return concept ? concept.label : String(keyword);
+    const label = concept ? concept.label : String(keyword);
+    const words = label.trim().split(/\s+/);
+    return words[words.length - 1];
   }
 
   // Decoys are drawn from every OTHER concept at the SAME tier as the

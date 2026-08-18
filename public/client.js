@@ -652,18 +652,57 @@
     if (pendingMoveCount === 0) optimisticPos = null;
   }
 
+  // Move requests are serialized -- only one /api/move is ever in flight at
+  // a time, with the rest queued in press order -- rather than each keydown
+  // firing its own independent fetch(). Two (or more) moves genuinely can be
+  // in flight together whenever keys are pressed faster than a round trip
+  // (routine, not an edge case: a cold serverless instance alone can take
+  // 100-400ms+ per the comment below), and nothing tied their *resolution*
+  // order to the order they were sent in -- LobbyManager's mutateRoom retries
+  // each one against "whatever the room looks like right now" on a save-race
+  // loss, with no sequence number to say which move was actually pressed
+  // first. Two overlapping requests could therefore get applied in swapped
+  // order: e.g. press right then down, but "down" resolves at the server
+  // first and "right" second. munch resolution happens at whatever cell the
+  // *server* occupies at the moment each request is actually applied, so the
+  // swap doesn't just reorder two moves that land on the same square either
+  // way -- it can walk the muncher over an entirely different pair of cells
+  // than the ones it visually passed through, silently skipping a poison
+  // tile the player clearly saw themselves cross. That tile then reads as
+  // "already eaten" the next time it's genuinely visited (since the earlier
+  // pass, the one that seemed to do nothing, was the one that never actually
+  // reached the server as that step), which is exactly the "off and back on"
+  // workaround this was producing -- and the next real move, computed from
+  // the server's true (still one step behind) position, visibly snaps the
+  // muncher to a different cell than the one it looked like it was
+  // standing on. Queuing removes the race outright: every move is applied
+  // in the same order it was pressed, so the server's position can never
+  // diverge from what was drawn.
+  let moveInFlight = false;
+  const moveQueue = [];
+
+  function pumpMoveQueue() {
+    if (moveInFlight || moveQueue.length === 0) return;
+    moveInFlight = true;
+    attemptMove(moveQueue.shift(), 0);
+  }
+
   const MOVE_RETRY_DELAYS_MS = [120, 250, 400];
   function attemptMove(dir, attempt) {
     api("move", { dir }).then((res) => {
       if (res.ok) {
         settleOneMove();
         applySnapshotIfFresh(res.room);
+        moveInFlight = false;
+        pumpMoveQueue();
         return;
       }
       if (attempt < MOVE_RETRY_DELAYS_MS.length) {
         setTimeout(() => attemptMove(dir, attempt + 1), MOVE_RETRY_DELAYS_MS[attempt]);
       } else {
         settleOneMove();
+        moveInFlight = false;
+        pumpMoveQueue();
       }
     });
   }
@@ -696,7 +735,8 @@
     lastMoveSentAt = now;
     predictMove(dir);
     pendingMoveCount += 1;
-    attemptMove(dir, 0);
+    moveQueue.push(dir);
+    pumpMoveQueue();
   }
 
   const DIR_KEYS = {
