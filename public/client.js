@@ -700,9 +700,24 @@
       if (attempt < MOVE_RETRY_DELAYS_MS.length) {
         setTimeout(() => attemptMove(dir, attempt + 1), MOVE_RETRY_DELAYS_MS[attempt]);
       } else {
+        // Every retry failed -- the move never actually landed server-side,
+        // so the optimistic prediction (predictMove) is now showing a
+        // position/munch that never happened. Previously this just gave up
+        // silently and let the *next* poll (up to 280ms later) or move
+        // response correct it, which is what "sent back to an earlier
+        // square" a moment later actually was. Resyncing immediately here
+        // instead means the correction happens right away, in the same
+        // instant the dropped keypress is given up on, rather than as a
+        // delayed, unexplained snap-back.
         settleOneMove();
         moveInFlight = false;
-        pumpMoveQueue();
+        fetch(`/api/room?code=${encodeURIComponent(currentRoomCode)}`)
+          .then((r) => r.json())
+          .then((data) => {
+            if (data.ok && data.room) applySnapshotIfFresh(data.room);
+          })
+          .catch(() => {})
+          .finally(pumpMoveQueue);
       }
     });
   }

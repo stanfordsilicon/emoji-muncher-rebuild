@@ -19,7 +19,31 @@ const { createRoomStore } = require("./store");
 // means another request genuinely raced this one to save the same room,
 // which even under fast repeated key-mashing is a small number of
 // concurrent requests at most, not dozens.
-const MAX_MUTATE_RETRIES = 6;
+const MAX_MUTATE_RETRIES = 8;
+
+// Delay before each retry (attempt 0 fires immediately, no wait). This used
+// to be zero -- retries looped as fast as the awaits resolved -- which
+// looked fine against a warm connection but gave a genuinely slow cold-start
+// Mongo connection (see mutateRoom's comment on `store.getRoom` misses) no
+// real time to finish before the retry budget ran out, so the whole request
+// gave up and dropped the move. A short, increasing backoff (capped, with a
+// little jitter so several requests retrying in lockstep don't keep landing
+// on each other) spreads the 8 attempts across roughly up to a second --
+// enough to cover a slow cold start -- while adding no delay at all to the
+// common case where the very first attempt already succeeds.
+const RETRY_BASE_DELAY_MS = 40;
+const RETRY_MAX_DELAY_MS = 220;
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function retryDelay(attempt) {
+  if (attempt === 0) return;
+  const base = Math.min(RETRY_MAX_DELAY_MS, RETRY_BASE_DELAY_MS * attempt);
+  const jitter = Math.random() * base * 0.5;
+  await sleep(base + jitter);
+}
 
 const store = createRoomStore();
 
@@ -37,6 +61,7 @@ function codeFor(playerId) {
 async function loadRoom(rawCode) {
   const code = codeFor(rawCode);
   for (let attempt = 0; attempt < MAX_MUTATE_RETRIES; attempt++) {
+    await retryDelay(attempt);
     const room = await store.getRoom(code);
     if (!room) return null;
     const changed = GameRoom.applyLazyStateUpdates(room);
@@ -83,6 +108,7 @@ async function mutateRoom(rawCode, mutateFn) {
   const code = codeFor(rawCode);
   let everFoundRoom = false;
   for (let attempt = 0; attempt < MAX_MUTATE_RETRIES; attempt++) {
+    await retryDelay(attempt);
     const room = await store.getRoom(code);
     if (!room) continue;
     everFoundRoom = true;
