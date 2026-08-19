@@ -1,2 +1,6 @@
 node_modules/
 .DS_Store
+
+# Never commit secrets -- DEEPL_API_KEY lives here (see scripts/translate.mjs)
+.env
+.env.*
