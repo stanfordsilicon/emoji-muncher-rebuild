@@ -62,7 +62,20 @@ const TARGETS = {
 // To add a key: put its name in this list and re-run. The next run will
 // overwrite the generated value with the English one. Removing a key from
 // the list sends it back to DeepL on the following run.
-const DO_NOT_TRANSLATE = new Set(["app_title"]);
+// The list is the UNION across every game in the suite, not per-repo: a key
+// that doesn't exist in this repo's en.json is simply never consulted, so
+// one shared list keeps this file byte-identical everywhere.
+//
+// Odd One Out renders its name as three stacked words, so all three are
+// part of the product name. Left to DeepL, "Out" became "Sortie" (exit) in
+// French and "Выход" in Russian.
+const DO_NOT_TRANSLATE = new Set([
+  "app_title",
+  "page_title",
+  "game_title_odd",
+  "game_title_one",
+  "game_title_out",
+]);
 
 // ---------------------------------------------------------------------
 // Placeholder + emoji handling
