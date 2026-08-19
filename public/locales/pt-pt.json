@@ -29,9 +29,9 @@
   "next_round_now": "Próxima ronda…",
   "persistent_hint": "Teclas de setas para te moveres. Corre até ao 🚩!",
   "game_over_title": "Fim do Jogo",
-  "final_score": "💯 Pontuação final: {score}",
+  "final_score": "🏆 Pontuação final: {score}",
   "all_time_leaderboard_heading": "Classificação histórica",
   "play_again_button": "Jogar de novo",
   "home_button": "🏠 Página inicial",
-  "all_time_score_summary": "melhor pontuação 💯 {score} · {games} partidas"
+  "all_time_score_summary": "melhor pontuação 🏆 {score} · {games} partidas"
 }
