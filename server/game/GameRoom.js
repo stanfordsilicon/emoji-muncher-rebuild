@@ -294,7 +294,19 @@ function maybeAdvanceRound(room) {
     return true;
   }
   if (active.length > 0 && active.every((p) => p.roundDone)) {
-    advanceAfterDelay(room);
+    // Feedback: "When the last round ends, it always says that the next
+    // round will start in 3 seconds, but it's supposed to be over."
+    // advanceAfterDelay() unconditionally sets nextRoundAt and a "roundEnd"
+    // status that the client renders as a "Next round in Xs" countdown --
+    // correct mid-game, but round === ROUND_COUNT has no next round to
+    // advance to (the following nextRound() call would immediately end the
+    // game anyway, per its own room.round > ROUND_COUNT check below). Ending
+    // the game directly here skips that pointless, misleading pause.
+    if (room.round >= config.ROUND_COUNT) {
+      endGame(room);
+    } else {
+      advanceAfterDelay(room);
+    }
     return true;
   }
   return false;

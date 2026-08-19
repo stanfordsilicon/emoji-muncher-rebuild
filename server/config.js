@@ -15,7 +15,12 @@ module.exports = {
   GRID_ROWS: num("GRID_ROWS", 7),
   ROUND_COUNT: num("ROUND_COUNT", 8),
   ROUND_TIME_MS: num("ROUND_TIME_MS", 40000),
-  NEXT_ROUND_PAUSE_MS: num("NEXT_ROUND_PAUSE_MS", 3000),
+  // Feedback: "I don't like how it waits 3 seconds to start the next round
+  // ... I personally prefer to start right away since it's meant to be a
+  // fast game." Trimmed to just enough for the last munch's flash/slime
+  // animation to finish (see client.js's markSlimed, up to ~340ms) plus a
+  // beat to actually read the round transition, not a full 3-count pause.
+  NEXT_ROUND_PAUSE_MS: num("NEXT_ROUND_PAUSE_MS", 1200),
   MOVE_COOLDOWN_MS: num("MOVE_COOLDOWN_MS", 0),
   STARTING_LIVES: num("STARTING_LIVES", 3),
   POINTS_PER_CORRECT: num("POINTS_PER_CORRECT", 10),

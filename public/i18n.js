@@ -12,7 +12,29 @@
 // (e.g. t('round_progress', { round: 2, total: 8 })). Falls back to the
 // raw key if it's ever missing, so a typo shows up as visibly broken text
 // instead of silently rendering nothing.
-const I18N_LANG = "en";
+//
+// Resolved per-call (not a fixed top-level const) so it reflects whatever
+// interface language the QMoji 2.0 homescreen actually launched this game
+// with (?uiLang=), read directly from the URL rather than waiting on
+// arcade-client.js's async initArcade() -- checking the URL synchronously
+// here means the very first render already picks the right language
+// instead of only catching up on a later visit once initArcade() has had a
+// chance to persist it to localStorage. Currently only "en" has a string
+// table, so every other uiLang still falls back to English until
+// translations are authored -- but the plumbing to actually pick them up
+// the moment they exist is real now, not silently dropped before it
+// reaches here.
+function resolveI18nLang() {
+  try {
+    const fromUrl = new URLSearchParams(location.search).get("uiLang");
+    if (fromUrl && I18N_STRINGS[fromUrl]) return fromUrl;
+    const fromStorage = localStorage.getItem("qmoji.uiLang");
+    if (fromStorage && I18N_STRINGS[fromStorage]) return fromStorage;
+  } catch (e) {
+    /* localStorage/URL access can throw in some embedded contexts -- fall through to "en" */
+  }
+  return "en";
+}
 
 const I18N_STRINGS = {
   en: {
@@ -55,7 +77,7 @@ const I18N_STRINGS = {
 };
 
 function t(key, vars) {
-  const table = I18N_STRINGS[I18N_LANG] || I18N_STRINGS.en;
+  const table = I18N_STRINGS[resolveI18nLang()] || I18N_STRINGS.en;
   let text = (table && table[key]) || I18N_STRINGS.en[key] || key;
   if (vars) {
     Object.keys(vars).forEach((k) => {

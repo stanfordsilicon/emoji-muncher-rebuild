@@ -158,6 +158,7 @@
       room: params.get("room"),
       lang: params.get("lang"),
       player: params.get("player"),
+      uiLang: params.get("uiLang"),
     };
   }
 
@@ -165,6 +166,17 @@
   // there's no room param or the lookup fails — the caller's existing
   // standalone start screen is always the fallback, per the contract:
   // "the arcade layer is an enhancement, not a dependency."
+  //
+  // uiLang used to be received but never actually read here -- the
+  // homescreen (qmoji/app.js) has sent it in the launch URL all along, but
+  // this function only ever destructured `lang` (the playing/input
+  // language) out of the params, so the interface-language choice never
+  // reached this game at all. That's the literal cause of "changing the
+  // language works well, but it doesn't translate to every game inside
+  // QMoji 2.0" -- there was nothing on the receiving end to translate
+  // *with* yet, in the case of this game, but at minimum the value now
+  // actually arrives instead of being silently dropped before i18n.js
+  // could ever set I18N_LANG from it.
   async function initArcade() {
     var params = readParams();
     if (!params.room) return null;
@@ -177,19 +189,29 @@
       try { localStorage.setItem("qmoji.lang", params.lang); } catch (e) {}
       document.documentElement.lang = params.lang;
     }
-    return { room: room, roomCode: params.room, lang: params.lang || room.language, playerId: params.player };
+    if (params.uiLang) {
+      try { localStorage.setItem("qmoji.uiLang", params.uiLang); } catch (e) {}
+    }
+    return {
+      room: room,
+      roomCode: params.room,
+      lang: params.lang || room.language,
+      uiLang: params.uiLang,
+      playerId: params.player,
+    };
   }
 
-  function launchUrl(baseUrl, roomCode, lang, playerId) {
+  function launchUrl(baseUrl, roomCode, lang, playerId, uiLang) {
     var url = new URL(baseUrl);
     if (roomCode) url.searchParams.set("room", roomCode);
     if (lang) url.searchParams.set("lang", lang);
     if (playerId) url.searchParams.set("player", playerId);
+    if (uiLang) url.searchParams.set("uiLang", uiLang);
     return url.toString();
   }
 
-  function backToHomescreenUrl(roomCode, lang, playerId) {
-    return launchUrl(homescreenUrl(), roomCode, lang, playerId);
+  function backToHomescreenUrl(roomCode, lang, playerId, uiLang) {
+    return launchUrl(homescreenUrl(), roomCode, lang, playerId, uiLang);
   }
 
   global.QMojiArcade = {
