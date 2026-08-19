@@ -107,6 +107,54 @@ winning, and never writes to it. For example, in `fr.overrides.json`:
 Overrides are validated on the same terms as generated text: if the English
 has `{score}` or an emoji, the override must have it too.
 
+## Glossary
+
+Recurring game vocabulary is pinned by a DeepL glossary so it stops being
+re-decided per string — "room" is a multiplayer session (not a bedroom),
+"host" is one word per language (French previously used three), "score"
+doesn't drift to "result".
+
+Terms live in **`scripts/glossary.json`**, which is committed. The script
+creates the glossary from that file and caches the returned ids in
+`.deepl-glossaries.json` (gitignored — ids are account-scoped). Editing
+`glossary.json` changes its content hash, which automatically invalidates
+the cache and re-translates that language on the next run.
+
+Two constraints worth knowing:
+
+- **DeepL's Free tier allows only one glossary on the account at a time.**
+  The script therefore acquires them one at a time, deleting the glossary
+  it previously created before making the next. It only ever deletes
+  glossaries named `qmoji-*`; anything else on the account is left alone.
+- **DeepL has no `EN→PT-BR` / `EN→PT-PT` glossary pair, only `EN→PT`.** So
+  pt-br and pt-pt each get their own `EN→PT` glossary with different
+  entries, selected by target. That is what keeps *rodada* and *ronda*
+  apart. If a language has no supported pair at all, the script says so and
+  translates without one — pin that language's vocabulary via overrides
+  instead.
+
+Glossary entries influence agreement, so a badly chosen term can cause new
+errors: French `round → manche` produced *"du manche"* (manche is feminine)
+until it was changed to the masculine `tour`. Prefer a term whose gender
+matches how it will be used.
+
+## Strings that must not be translated
+
+`DO_NOT_TRANSLATE` in `scripts/translate.mjs` lists keys copied verbatim
+into every language and never sent to DeepL. Product names belong here —
+`app_title` is on the list because translating it produced a different game
+name in each language.
+
+To add a key: add its name to that Set and re-run. The next run overwrites
+the generated value with the English one.
+
+## Provenance
+
+`TRANSLATION_NOTES.md` records every overridden string: the language, what
+was wrong with the machine output, the replacement, and a review status.
+Entries default to `claude-corrected, unverified` and should only be moved
+to `human-verified` by someone who speaks the language.
+
 ## Adding a language
 
 1. `node scripts/translate.mjs <code>` (after adding it to `TARGETS` in
