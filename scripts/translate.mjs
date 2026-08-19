@@ -3,6 +3,7 @@
 //
 //   DEEPL_API_KEY=... node scripts/translate.mjs            # all languages
 //   DEEPL_API_KEY=... node scripts/translate.mjs fr pt-br   # just these
+//   DEEPL_API_KEY=... node scripts/translate.mjs --force      # ignore cache
 //
 // This file is identical in survey-scramble-rebuild and emoji-muncher-rebuild.
 // Keep it that way -- if one needs a change, both get it.
@@ -34,6 +35,7 @@
 // to DeepL -- it also keeps the API bill proportional to real edits.
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -51,6 +53,16 @@ const TARGETS = {
   "pt-pt": "PT-PT",
   ru: "RU",
 };
+
+// Keys whose value is passed through to every language VERBATIM, never
+// sent to DeepL. Product names live here: "Moji Mojo" is a name, not a
+// phrase, and translating it produced a different game name in each
+// language ("La course aux sondages !", "Опрос-гонка!").
+//
+// To add a key: put its name in this list and re-run. The next run will
+// overwrite the generated value with the English one. Removing a key from
+// the list sends it back to DeepL on the following run.
+const DO_NOT_TRANSLATE = new Set(["app_title"]);
 
 // ---------------------------------------------------------------------
 // Placeholder + emoji handling
@@ -101,6 +113,54 @@ function unprotect(text) {
   return text.split(`<${IGNORE_TAG}>`).join("").split(`</${IGNORE_TAG}>`).join("");
 }
 
+// ---------------------------------------------------------------------
+// Quote artifacts around protected spans
+// ---------------------------------------------------------------------
+//
+// DeepL treats an ignored tag as an opaque foreign term and often wraps it
+// in quotation marks that the English never had: "Next round in {seconds}"
+// comes back as «{seconds}», and "Race to the 🚩" as «🚩». Validation can't
+// catch this -- the token and the emoji are both present and correct -- so
+// it has to be undone here.
+//
+// It is NOT a blanket strip. guess_correct legitimately quotes {keyword} in
+// English, and removing those quotes would be a regression. So we record
+// which protected spans the SOURCE quoted, and only strip quotes around
+// spans it didn't.
+const QUOTE_OPEN = "«\"“„‘'";
+const QUOTE_CLOSE = "»\"”‟’'";
+const OPEN_CLASS = "[«\"“„‘']";
+const CLOSE_CLASS = "[»\"”‟’']";
+
+// French sets its guillemets off with a narrow no-break space on the inside
+// (« mot »). DeepL's output is inconsistent about this -- «{name} » had a
+// space on the closing side only. Where quotes are legitimate we normalize
+// to the language's own convention rather than leaving them lopsided.
+const NNBSP = "\u202F";
+
+function quotedSpansInSource(protectedSource) {
+  const set = new Set();
+  const re = new RegExp(`${OPEN_CLASS}\\s*<${IGNORE_TAG}>(.*?)</${IGNORE_TAG}>\\s*${CLOSE_CLASS}`, "gs");
+  let m;
+  while ((m = re.exec(protectedSource)) !== null) set.add(m[1]);
+  return set;
+}
+
+// Operates on the still-tagged translation, so span boundaries are exact.
+function fixQuoteArtifacts(translated, quotedInSource, lang) {
+  const re = new RegExp(
+    `(${OPEN_CLASS})(\\s*)<${IGNORE_TAG}>(.*?)</${IGNORE_TAG}>(\\s*)(${CLOSE_CLASS})`,
+    "gs",
+  );
+  return translated.replace(re, (_full, open, _s1, content, _s2, close) => {
+    const span = `<${IGNORE_TAG}>${content}</${IGNORE_TAG}>`;
+    if (!quotedInSource.has(content)) return span; // spurious -- drop the quotes
+    // Legitimate quotes: keep them, but make the spacing symmetric.
+    if (lang === "fr") return `«${NNBSP}${span}${NNBSP}»`;
+    return `${open}${span}${close}`; // es/pt/ru: no inner spacing
+  });
+}
+
 function escapeXml(s) {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
@@ -118,7 +178,142 @@ function apiBase(key) {
   return key.endsWith(":fx") ? "https://api-free.deepl.com" : "https://api.deepl.com";
 }
 
-async function deeplTranslate(key, texts, target) {
+// ---------------------------------------------------------------------
+// Glossaries
+// ---------------------------------------------------------------------
+//
+// A glossary pins the recurring game-domain vocabulary so DeepL stops
+// re-deciding it per string: "room" is a multiplayer session, not a
+// bedroom; "host" is one word per language, not three. Source terms live
+// in scripts/glossary.json (committed); the returned IDs live in
+// .deepl-glossaries.json (gitignored -- they're account-scoped).
+//
+// DeepL glossaries are immutable, so we hash the entries and create a
+// replacement whenever glossary.json changes. Note DeepL supports EN->PT
+// but not EN->PT-BR / EN->PT-PT: pt-br and pt-pt therefore get two
+// separate EN->PT glossaries and we select by target, which is what keeps
+// "rodada" and "ronda" apart.
+
+const GLOSSARY_SOURCE = join(HERE, "glossary.json");
+const GLOSSARY_CACHE = join(HERE, "..", ".deepl-glossaries.json");
+
+function entriesToTsv(entries) {
+  return Object.entries(entries)
+    .map(([en, tgt]) => `${en}\t${tgt}`)
+    .join("\n");
+}
+
+function hashEntries(tsv) {
+  return createHash("sha256").update(tsv, "utf8").digest("hex").slice(0, 16);
+}
+
+async function supportedGlossaryTargets(key) {
+  const res = await fetch(`${apiBase(key)}/v2/glossary-language-pairs`, {
+    headers: { Authorization: `DeepL-Auth-Key ${key}` },
+  });
+  if (!res.ok) return null; // treat as "unknown" -- caller degrades gracefully
+  const json = await res.json();
+  return new Set(
+    json.supported_languages
+      .filter((p) => p.source_lang.toLowerCase() === "en")
+      .map((p) => p.target_lang.toLowerCase()),
+  );
+}
+
+async function createGlossary(key, name, targetLang, tsv) {
+  const res = await fetch(`${apiBase(key)}/v2/glossaries`, {
+    method: "POST",
+    headers: { Authorization: `DeepL-Auth-Key ${key}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      name,
+      source_lang: "en",
+      target_lang: targetLang,
+      entries: tsv,
+      entries_format: "tsv",
+    }),
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`glossary create ${res.status}: ${body.slice(0, 300)}`);
+  }
+  return (await res.json()).glossary_id;
+}
+
+// DeepL's Free tier permits only ONE glossary on the account at a time
+// (creating a second returns 456 "Too many glossaries"). Five languages
+// therefore cannot each hold one simultaneously. Instead we acquire them
+// one at a time, in sequence: before translating a language we make room
+// by deleting any glossary this script previously created, then create
+// that language's.
+//
+// Only glossaries named "qmoji-*" are ever deleted -- anything else on the
+// account belongs to somebody else and is left strictly alone. Deleting
+// ours is safe because scripts/glossary.json can recreate them exactly.
+//
+// A glossary is identified by the hash of its ENTRIES, never by its id.
+// Ids change every time we recreate one; hashing the content instead is
+// what keeps re-runs idempotent rather than re-translating everything.
+async function listOurGlossaries(key) {
+  const res = await fetch(`${apiBase(key)}/v2/glossaries`, {
+    headers: { Authorization: `DeepL-Auth-Key ${key}` },
+  });
+  if (!res.ok) return [];
+  const json = await res.json();
+  return (json.glossaries || []).filter((g) => g.name.startsWith("qmoji-"));
+}
+
+async function deleteGlossary(key, id) {
+  await fetch(`${apiBase(key)}/v2/glossaries/${id}`, {
+    method: "DELETE",
+    headers: { Authorization: `DeepL-Auth-Key ${key}` },
+  }).catch(() => {});
+}
+
+// Returns { id, hash } or null. Never throws -- a language without a
+// glossary still translates, it just doesn't get its vocabulary pinned.
+async function acquireGlossary(key, lang, supported) {
+  const source = readJson(GLOSSARY_SOURCE, {}) || {};
+  const entries = source[lang];
+  if (!entries || Object.keys(entries).length === 0) return null;
+
+  // EN->PT-BR / EN->PT-PT are not glossary pairs; EN->PT is. pt-br and
+  // pt-pt therefore get separate EN->PT glossaries, distinguished by their
+  // entries -- which is what keeps "rodada" and "ronda" apart.
+  const base = lang.split("-")[0];
+  let glossaryLang = null;
+  if (!supported) glossaryLang = base;
+  else if (supported.has(lang)) glossaryLang = lang;
+  else if (supported.has(base)) glossaryLang = base;
+  if (!glossaryLang) {
+    console.warn(
+      `[${lang}] DeepL has no glossary pair for EN->${lang.toUpperCase()} or ` +
+        `EN->${base.toUpperCase()} -- translating without one. Pin this ` +
+        `language's vocabulary in ${lang}.overrides.json instead.`,
+    );
+    return null;
+  }
+
+  const tsv = entriesToTsv(entries);
+  const hash = hashEntries(tsv + "|" + glossaryLang);
+  const wantName = `qmoji-${lang}-${hash}`;
+
+  const existing = await listOurGlossaries(key);
+  const reusable = existing.find((g) => g.name === wantName && g.ready !== false);
+  if (reusable) return { id: reusable.glossary_id, hash };
+
+  for (const g of existing) await deleteGlossary(key, g.glossary_id); // make room
+
+  try {
+    const id = await createGlossary(key, wantName, glossaryLang, tsv);
+    console.log(`[${lang}] glossary EN->${glossaryLang.toUpperCase()} (${Object.keys(entries).length} terms)`);
+    return { id, hash };
+  } catch (e) {
+    console.warn(`[${lang}] glossary unavailable (${e.message}) -- translating without one`);
+    return null;
+  }
+}
+
+async function deeplTranslate(key, texts, target, glossaryId) {
   if (texts.length === 0) return [];
   const res = await fetch(`${apiBase(key)}/v2/translate`, {
     method: "POST",
@@ -132,6 +327,7 @@ async function deeplTranslate(key, texts, target) {
       target_lang: target,
       tag_handling: "xml",
       ignore_tags: [IGNORE_TAG],
+      ...(glossaryId ? { glossary_id: glossaryId } : {}),
       // UI chrome: buttons and labels, not prose. Keep line structure.
       split_sentences: "nonewlines",
       preserve_formatting: true,
@@ -210,7 +406,13 @@ async function main() {
   const source = readJson(SOURCE);
   if (!source) throw new Error(`missing source file: ${SOURCE}`);
 
-  const requested = process.argv.slice(2).map((a) => a.toLowerCase());
+  const argv = process.argv.slice(2);
+  // --force re-translates everything even when the English is unchanged.
+  // Needed when something OTHER than the source text changes the output:
+  // a new glossary, a change to how placeholders are protected, a fix to
+  // the quote-artifact repair.
+  const force = argv.includes("--force");
+  const requested = argv.filter((a) => !a.startsWith("--")).map((a) => a.toLowerCase());
   const langs = requested.length ? requested : Object.keys(TARGETS);
   for (const l of langs) {
     if (!TARGETS[l]) throw new Error(`unknown language "${l}" -- known: ${Object.keys(TARGETS).join(", ")}`);
@@ -219,6 +421,9 @@ async function main() {
   mkdirSync(LOCALES, { recursive: true });
   console.log(`source: ${Object.keys(source).length} keys  ->  ${langs.join(", ")}`);
 
+  const glossarySupport = await supportedGlossaryTargets(key);
+  const glossaryCache = readJson(GLOSSARY_CACHE, {}) || {};
+
   let failed = 0;
   for (const lang of langs) {
     const outPath = join(LOCALES, `${lang}.json`);
@@ -226,7 +431,19 @@ async function main() {
     // READ ONLY. This script must never write this file.
     const overrides = readJson(overridesPath, {}) || {};
     const previous = readJson(outPath, {}) || {};
-    const previousEn = readJson(join(LOCALES, `.${lang}.en-snapshot.json`), {}) || {};
+    const glossary = await acquireGlossary(key, lang, glossarySupport);
+    if (glossary) glossaryCache[lang] = { id: glossary.id, hash: glossary.hash };
+    const snapshotPath = join(LOCALES, `.${lang}.en-snapshot.json`);
+    const previousSnapshot = readJson(snapshotPath, {}) || {};
+    const previousEn = previousSnapshot.strings || {};
+    // A glossary change alters the output without altering the English, so
+    // it has to invalidate the cache the same way an English edit does --
+    // otherwise the new vocabulary silently never gets applied.
+    const glossaryStamp = glossary ? glossary.hash : "none";
+    const glossaryChanged = previousSnapshot.glossary !== glossaryStamp;
+    if (glossaryChanged && Object.keys(previousEn).length) {
+      console.log(`[${lang}] glossary changed -- re-translating all keys`);
+    }
 
     // Only send keys whose English changed since the snapshot, or that we
     // have no previous translation for. Overridden keys are never sent --
@@ -234,8 +451,9 @@ async function main() {
     // be pure waste.
     const stale = [];
     for (const [k, en] of Object.entries(source)) {
+      if (DO_NOT_TRANSLATE.has(k)) continue; // passed through verbatim below
       if (Object.prototype.hasOwnProperty.call(overrides, k)) continue;
-      if (typeof previous[k] === "string" && previousEn[k] === en) continue;
+      if (!force && !glossaryChanged && typeof previous[k] === "string" && previousEn[k] === en) continue;
       stale.push(k);
     }
 
@@ -246,7 +464,10 @@ async function main() {
     const activeOverrides = Object.keys(overrides).filter((k) =>
       Object.prototype.hasOwnProperty.call(source, k),
     ).length;
-    console.log(`\n[${lang}] ${stale.length} key(s) to translate, ${activeOverrides} override(s)`);
+    console.log(
+      `\n[${lang}] ${stale.length} key(s) to translate, ${activeOverrides} override(s), ` +
+        `glossary ${glossary ? "yes" : "no"}`,
+    );
 
     let fresh = {};
     if (stale.length) {
@@ -254,20 +475,30 @@ async function main() {
       // Doing it the other way round escapes the tags we just added, so
       // DeepL receives literal "&lt;x&gt;" text, ignore_tags never fires,
       // and every placeholder gets translated. Ask how I know.
-      const payload = stale.map((k) => protect(escapeXml(source[k])));
+      const protectedSources = stale.map((k) => protect(escapeXml(source[k])));
+      const payload = protectedSources;
       let translated;
       try {
-        translated = await deeplTranslate(key, payload, TARGETS[lang]);
+        translated = await deeplTranslate(key, payload, TARGETS[lang], glossary && glossary.id);
       } catch (e) {
         console.error(`[${lang}] FAILED: ${e.message}`);
         failed++;
         continue;
       }
       stale.forEach((k, i) => {
-        // Mirror image: strip our real tags first, then unescape, so a
-        // literal "<x>" that came from the source text is never mistaken
-        // for one of our markers.
-        fresh[k] = unescapeXml(unprotect(translated[i])).trim();
+        // Repair quote artifacts while the tags are still in place (span
+        // boundaries are exact there), comparing against what the source
+        // actually quoted. Then strip our real tags, then unescape -- in
+        // that order, so a literal "<x>" from the source text is never
+        // mistaken for one of our markers.
+        const repaired = fixQuoteArtifacts(
+          translated[i],
+          quotedSpansInSource(protectedSources[i]),
+          lang,
+        );
+        fresh[k] = unescapeXml(unprotect(repaired))
+          .replace(/ {2,}/g, " ") // collapse gaps left by removed quotes
+          .trim();
       });
     }
 
@@ -278,6 +509,8 @@ async function main() {
     for (const k of Object.keys(source)) {
       if (Object.prototype.hasOwnProperty.call(overrides, k)) {
         out[k] = overrides[k];
+      } else if (DO_NOT_TRANSLATE.has(k)) {
+        out[k] = source[k];
       } else if (Object.prototype.hasOwnProperty.call(fresh, k)) {
         out[k] = fresh[k];
       } else if (typeof previous[k] === "string") {
@@ -298,9 +531,15 @@ async function main() {
     // Snapshot of the English each translation was made from -- this is
     // what makes re-runs idempotent and change-scoped. Dotfile, committed
     // alongside the locale so a fresh clone re-runs cleanly.
-    writeFileSync(join(LOCALES, `.${lang}.en-snapshot.json`), JSON.stringify(snapshot, null, 2) + "\n", "utf8");
+    writeFileSync(
+      snapshotPath,
+      JSON.stringify({ glossary: glossaryStamp, strings: snapshot }, null, 2) + "\n",
+      "utf8",
+    );
     console.log(`[${lang}] wrote ${outPath} (${Object.keys(out).length} keys, validated)`);
   }
+
+  writeFileSync(GLOSSARY_CACHE, JSON.stringify(glossaryCache, null, 2) + "\n", "utf8");
 
   if (failed) {
     console.error(`\n${failed} language(s) failed. Nothing was written for those.`);
@@ -311,7 +550,7 @@ async function main() {
 
 // Exported so the pure logic (token/emoji protection and validation) can
 // be exercised by a test without performing a translation run.
-export { protect, unprotect, escapeXml, unescapeXml, emojiCodepoints, validate, apiBase };
+export { protect, unprotect, escapeXml, unescapeXml, emojiCodepoints, validate, apiBase, quotedSpansInSource, fixQuoteArtifacts, DO_NOT_TRANSLATE };
 
 // Only run when invoked directly, not when imported.
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

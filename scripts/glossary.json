@@ -1,0 +1,67 @@
+{
+  "_readme": [
+    "DeepL glossary source. Committed and version-controlled so the glossaries",
+    "are reproducible: scripts/translate.mjs creates a DeepL glossary per",
+    "language from this file and uses it on every translation request.",
+    "",
+    "These are the recurring game-domain terms DeepL got wrong when left to",
+    "its own devices -- 'room' became 'bedroom' (quarto/habitación/chambre),",
+    "'host' came back as three different words within French alone, and",
+    "'score' drifted to 'result'. One term per concept per language.",
+    "",
+    "Glossaries are immutable in DeepL, so editing this file does not mutate",
+    "an existing glossary -- the script hashes the entries and creates a",
+    "replacement when the hash changes. Glossary IDs are cached in",
+    ".deepl-glossaries.json, which is gitignored (IDs are account-scoped and",
+    "meaningless in another checkout).",
+    "",
+    "DeepL supports glossaries for EN->PT but not for PT-BR/PT-PT separately,",
+    "so pt-br and pt-pt each get their own EN->PT glossary and the script",
+    "picks the right ID per target. That is what keeps rodada/ronda apart."
+  ],
+  "fr": {
+    "room": "salon",
+    "host": "hôte",
+    "round": "tour",
+    "score": "score",
+    "leaderboard": "classement",
+    "lobby": "salon d'attente",
+    "ready": "prêt"
+  },
+  "es": {
+    "room": "sala",
+    "host": "anfitrión",
+    "round": "ronda",
+    "score": "puntuación",
+    "leaderboard": "clasificación",
+    "lobby": "sala de espera",
+    "ready": "listo"
+  },
+  "pt-br": {
+    "room": "sala",
+    "host": "anfitrião",
+    "round": "rodada",
+    "score": "pontuação",
+    "leaderboard": "classificação",
+    "lobby": "sala de espera",
+    "ready": "pronto"
+  },
+  "pt-pt": {
+    "room": "sala",
+    "host": "anfitrião",
+    "round": "ronda",
+    "score": "pontuação",
+    "leaderboard": "classificação",
+    "lobby": "sala de espera",
+    "ready": "pronto"
+  },
+  "ru": {
+    "room": "комната",
+    "host": "ведущий",
+    "round": "раунд",
+    "score": "счёт",
+    "leaderboard": "таблица лидеров",
+    "lobby": "лобби",
+    "ready": "готов"
+  }
+}
