@@ -60,13 +60,26 @@ English string, never the raw key.
 ## Regenerating translations
 
 ```bash
-export DEEPL_API_KEY=...          # or put it in .env (gitignored)
-node scripts/translate.mjs        # all languages
-node scripts/translate.mjs fr ru  # just these
+node --env-file=$HOME/.config/qmoji/deepl.env scripts/translate.mjs        # all languages
+node --env-file=$HOME/.config/qmoji/deepl.env scripts/translate.mjs fr ru  # just these
+```
+
+The key lives in `~/.config/qmoji/deepl.env` (mode 0600), **deliberately
+outside every repo** so it cannot be committed by accident -- not in a
+repo-local `.env`, not in a shell profile. `--env-file` loads it into the
+process environment for that one command; the script reads
+`process.env.DEEPL_API_KEY` and never writes it anywhere.
+
+That file holds a single line:
+
+```
+DEEPL_API_KEY=<your key>
 ```
 
 Free-tier DeepL keys end in `:fx` and are routed to `api-free.deepl.com`
-automatically. **Never commit the key.**
+automatically; everything else goes to `api.deepl.com`. **Never copy the key
+into this repo, a shell profile, or any committed file.** (`.env` is
+gitignored here as a second line of defence, not as the intended home.)
 
 The script is idempotent: it only re-translates keys whose English actually
 changed (tracked by a `.<lang>.en-snapshot.json` file), so re-running with
