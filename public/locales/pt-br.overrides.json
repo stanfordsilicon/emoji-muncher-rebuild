@@ -20,5 +20,5 @@
   ],
   "signed_in_as": "Conectado como {name}",
   "next_round_in": "Próxima rodada em {seconds}…",
-  "all_time_score_summary": "melhor pontuação 💯 {score} · {games} partidas"
+  "all_time_score_summary": "melhor pontuação 🏆 {score} · {games} partidas"
 }

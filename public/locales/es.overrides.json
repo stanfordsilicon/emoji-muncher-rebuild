@@ -22,5 +22,5 @@
   "stat_games_played": "Partidas jugadas",
   "stat_last_played": "Última partida",
   "play_again_button": "Volver a jugar",
-  "all_time_score_summary": "mejor puntuación 💯 {score} · {games} partidas"
+  "all_time_score_summary": "mejor puntuación 🏆 {score} · {games} partidas"
 }

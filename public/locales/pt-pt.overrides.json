@@ -24,6 +24,6 @@
   "round_progress": "Ronda {round}/{total}",
   "next_round_in": "Próxima ronda em {seconds}…",
   "persistent_hint": "Teclas de setas para te moveres. Corre até ao 🚩!",
-  "all_time_score_summary": "melhor pontuação 💯 {score} · {games} partidas",
+  "all_time_score_summary": "melhor pontuação 🏆 {score} · {games} partidas",
   "signed_in_as": "Sessão iniciada como {name}"
 }

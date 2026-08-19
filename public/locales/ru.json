@@ -29,9 +29,9 @@
   "next_round_now": "Следующий раунд…",
   "persistent_hint": "Стрелки — для перемещения. Мчись к 🚩!",
   "game_over_title": "Игра окончена",
-  "final_score": "💯 Итоговый счёт: {score}",
+  "final_score": "🏆 Итоговый счёт: {score}",
   "all_time_leaderboard_heading": "Таблица лидеров за всю историю",
   "play_again_button": "Играть ещё раз",
   "home_button": "🏠 Главная",
-  "all_time_score_summary": "лучший счёт 💯 {score} · игр: {games}"
+  "all_time_score_summary": "лучший счёт 🏆 {score} · игр: {games}"
 }

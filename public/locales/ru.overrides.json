@@ -25,6 +25,6 @@
   "stat_last_played": "Последняя игра",
   "round_one_banner": "Съедай смайлики, соответствующие ключевому слову — остальные стоят жизни. Мчись к 🚩!",
   "persistent_hint": "Стрелки — для перемещения. Мчись к 🚩!",
-  "all_time_score_summary": "лучший счёт 💯 {score} · игр: {games}",
+  "all_time_score_summary": "лучший счёт 🏆 {score} · игр: {games}",
   "signed_in_as": "Вошёл как {name}"
 }
