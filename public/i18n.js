@@ -68,11 +68,11 @@ const I18N_STRINGS = {
     next_round_now: "Next round…",
     persistent_hint: "Arrow keys to move. Race to the 🚩!",
     game_over_title: "Game Over",
-    final_score: "💯 Final score: {score}",
+    final_score: "🏆 Final score: {score}",
     all_time_leaderboard_heading: "All-time leaderboard",
     play_again_button: "Play Again",
     home_button: "🏠 Home",
-    all_time_score_summary: "best 💯 {score} · {games} games",
+    all_time_score_summary: "best 🏆 {score} · {games} games",
   },
 };
 
