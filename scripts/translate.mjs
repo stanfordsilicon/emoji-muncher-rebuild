@@ -200,7 +200,8 @@ async function main() {
   if (!key) {
     console.error(
       "DEEPL_API_KEY is not set.\n" +
-        "  export DEEPL_API_KEY=... (or put it in .env, which is gitignored)\n" +
+        "  node --env-file=$HOME/.config/qmoji/deepl.env scripts/translate.mjs\n" +
+        "  The key lives outside every repo on purpose -- don't copy it in here.\n" +
         "  Free-tier keys end in ':fx' and are routed to api-free.deepl.com automatically.",
     );
     process.exit(1);
@@ -238,7 +239,14 @@ async function main() {
       stale.push(k);
     }
 
-    console.log(`\n[${lang}] ${stale.length} key(s) to translate, ${Object.keys(overrides).length} override(s)`);
+    // Count only overrides that actually apply. The overrides file carries
+    // a "_readme" key explaining the rule, and keys that no longer exist in
+    // en.json are inert too -- reporting either as an active override would
+    // misrepresent how much of this locale is hand-corrected.
+    const activeOverrides = Object.keys(overrides).filter((k) =>
+      Object.prototype.hasOwnProperty.call(source, k),
+    ).length;
+    console.log(`\n[${lang}] ${stale.length} key(s) to translate, ${activeOverrides} override(s)`);
 
     let fresh = {};
     if (stale.length) {
