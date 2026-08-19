@@ -1,0 +1,21 @@
+{
+  "_readme": [
+    "HUMAN OVERRIDES for fr. This file is hand-maintained and always wins.",
+    "",
+    "scripts/translate.mjs READS this file and merges it on top of DeepL's",
+    "output. It never writes to, modifies, or deletes this file.",
+    "",
+    "To fix a bad translation, add the key HERE -- do not edit fr.json,",
+    "which is regenerated and overwritten on every run.",
+    "",
+    "Add real entries as siblings of this _readme key, e.g.:",
+    "  \"play_button\": \"Jouer\"",
+    "Keys must match public/locales/en.json. Any {placeholder} tokens and",
+    "emoji in the English string must appear in the override too -- the",
+    "generator validates overrides exactly like generated text and will",
+    "refuse to write the locale if they don't match.",
+    "",
+    "This _readme key is ignored: the merge only considers keys that exist",
+    "in en.json. (JSON has no comment syntax, hence a key.)"
+  ]
+}

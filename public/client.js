@@ -1,4 +1,7 @@
-(function () {
+// Gated on initI18n(): the string table now arrives over the network, so
+// nothing here may run until it has loaded -- the very first statement
+// below paints UI text. initI18n() never rejects, so this always runs.
+initI18n().then(function () {
   "use strict";
 
   // Static (non-templated) UI text is data-i18n-driven -- see public/i18n.js.
@@ -861,4 +864,4 @@
     clearInterval(heartbeatTimer);
     heartbeatTimer = null;
   }
-})();
+});
