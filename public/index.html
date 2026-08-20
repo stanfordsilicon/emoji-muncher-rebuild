@@ -1,7 +1,15 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="i18n-loading">
 <head>
 <meta charset="UTF-8">
+<!-- Hides the document until i18n.js has fetched its string table and
+     applyStaticTranslations() has run, which removes this class. Without
+     it, the first paint shows raw snake_case keys for a frame. Inline
+     (not in style.css) so the rule is guaranteed to apply before any
+     paint, and so the mechanism can't be broken by an unrelated
+     stylesheet edit. A "loading" word would itself need translating, so
+     the document is simply hidden rather than showing one. -->
+<style>html.i18n-loading body { visibility: hidden; }</style>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Emoji Munchers</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">

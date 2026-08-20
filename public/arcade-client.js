@@ -179,6 +179,7 @@
   // could ever set I18N_LANG from it.
   async function initArcade() {
     var params = readParams();
+    var normalizedUiLang = null;
     if (!params.room) return null;
     var room = await getRoom(params.room);
     if (!room) return null;
@@ -190,13 +191,24 @@
       document.documentElement.lang = params.lang;
     }
     if (params.uiLang) {
-      try { localStorage.setItem("qmoji.uiLang", params.uiLang); } catch (e) {}
+      // Normalized before it's stored, never stored raw. A hand-typed or
+      // third-party "?uiLang=PT-BR" would otherwise poison localStorage
+      // with an uppercase value that every later lookup misses -- and
+      // uiLang is used to build a locale FILENAME, which is
+      // case-sensitive on Vercel even though it isn't on macOS. Same
+      // normalization as i18n.js's normalizeLang(); duplicated rather
+      // than shared because this file must stay self-contained (it is
+      // byte-identical across the game repos and does not assume
+      // i18n.js is present).
+      normalizedUiLang = String(params.uiLang).trim().toLowerCase().replace(/_/g, "-");
+      if (normalizedUiLang === "pt") normalizedUiLang = "pt-br";
+      try { localStorage.setItem("qmoji.uiLang", normalizedUiLang); } catch (e) {}
     }
     return {
       room: room,
       roomCode: params.room,
       lang: params.lang || room.language,
-      uiLang: params.uiLang,
+      uiLang: normalizedUiLang,
       playerId: params.player,
     };
   }
