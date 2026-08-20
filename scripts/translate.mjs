@@ -4,6 +4,7 @@
 //   DEEPL_API_KEY=... node scripts/translate.mjs            # all languages
 //   DEEPL_API_KEY=... node scripts/translate.mjs fr pt-br   # just these
 //   DEEPL_API_KEY=... node scripts/translate.mjs --force      # ignore cache
+//   DEEPL_API_KEY=... node scripts/translate.mjs --bundle=factoids
 //
 // This file is identical in survey-scramble-rebuild and emoji-muncher-rebuild.
 // Keep it that way -- if one needs a change, both get it.
@@ -41,7 +42,27 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const LOCALES = join(HERE, "..", "public", "locales");
-const SOURCE = join(LOCALES, "en.json");
+
+// A "bundle" is one independently-translated set of strings. The default
+// bundle is the UI chrome (en.json -> fr.json, ...). --bundle=factoids
+// translates the Did You Know content instead (factoids.en.json ->
+// factoids.fr.json, ...), with its own overrides and its own snapshot.
+//
+// They are separate on purpose: 100 prose entries in the same file as 57
+// chrome keys makes both the diffs and the overrides file unreadable, the
+// two have different review cadences, and a missing factoid is cosmetic
+// where a missing button label is broken UI. Same pipeline either way --
+// same glossary, same overrides mechanism, same validation.
+function bundlePaths(bundle) {
+  const p = bundle ? bundle + "." : "";
+  return {
+    source: join(LOCALES, `${p}en.json`),
+    out: (lang) => join(LOCALES, `${p}${lang}.json`),
+    overrides: (lang) => join(LOCALES, `${p}${lang}.overrides.json`),
+    numericExempt: join(LOCALES, `${p}numeric-exempt.json`),
+    snapshot: (lang) => join(LOCALES, `.${p}${lang}.en-snapshot.json`),
+  };
+}
 
 // Canonical lowercase codes (our filenames) -> DeepL's target codes.
 // DeepL requires the regional variant for Portuguese: PT-BR / PT-PT.
@@ -388,8 +409,17 @@ function normalizeNumber(tok) {
   return s.replace(/\.$/, "");
 }
 
+// "1998-99" and "1998-1999" are the same range; Russian and French routinely
+// expand the abbreviated form. Expanding BOTH sides before comparing means
+// that reads as identical rather than as 99 having become 1999.
+function expandYearRanges(str) {
+  return str.replace(/\b(\d{2})(\d{2})\s*[\u2013\u2014-]\s*(\d{2})\b(?!\d)/g, "$1$2-$1$3");
+}
+
 function numberSequence(str) {
-  return (str.match(NUMBER_RE) || []).map((t) => t.replace(/[\u00A0\u202F\u2009\u2007 ]/g, ""));
+  return (expandYearRanges(str).match(NUMBER_RE) || []).map((t) =>
+    t.replace(/[\u00A0\u202F\u2009\u2007 ]/g, ""),
+  );
 }
 
 // French and Russian often group digits with an ORDINARY space ("1 500").
@@ -402,7 +432,18 @@ function numberSequenceLoose(str) {
   return numberSequence(merged);
 }
 
-function validate(lang, source, out) {
+function sortedNums(list) {
+  return list.slice().sort();
+}
+
+// Some figures legitimately disappear in translation: "#1 most-used" becomes
+// "the most used", "10th anniversary" becomes "décimo aniversario". The
+// figure is gone but the claim is unchanged. Rather than loosen the check
+// for everything, those keys are named one at a time in
+// <bundle>.numeric-exempt.json, each with a written reason, so every
+// exemption stays a deliberate and reviewable decision. Exempt keys still
+// report their mismatch -- they just don't fail the run.
+function validate(lang, source, out, numericExempt) {
   const problems = [];
   const formatNotes = [];
   for (const [key, en] of Object.entries(source)) {
@@ -422,22 +463,34 @@ function validate(lang, source, out) {
     const outNums = numberSequence(got);
     const srcNorm = srcNums.map(normalizeNumber);
     const outNorm = outNums.map(normalizeNumber);
-    let matched = sameMultiset(srcNorm, outNorm);
+    // Pass/fail is on the SET of figures, not their order. Dropping or
+    // altering a number is an error; reordering is not -- translating
+    // "iOS 5 in 2011" into Russian naturally yields "in 2011, with iOS 5",
+    // and failing that would be a false alarm on correct output. Order
+    // differences are reported instead, alongside formatting ones.
+    let matched = sameMultiset(sortedNums(srcNorm), sortedNums(outNorm));
     let outShown = outNums;
     if (!matched) {
       const loose = numberSequenceLoose(got);
-      if (sameMultiset(srcNorm, loose.map(normalizeNumber))) {
+      if (sameMultiset(sortedNums(srcNorm), sortedNums(loose.map(normalizeNumber)))) {
         matched = true;
         outShown = loose; // grouped with plain spaces -- a format difference
       }
     }
     if (!matched) {
-      problems.push(
-        `${key}: number mismatch -- source has [${srcNums.join(", ") || "none"}], output has [${outNums.join(", ") || "none"}]\n      en: ${en}\n      ${lang}: ${got}`,
-      );
+      const line = `${key}: number mismatch -- source has [${srcNums.join(", ") || "none"}], output has [${outNums.join(", ") || "none"}]\n      en: ${en}\n      ${lang}: ${got}`;
+      if (numericExempt && Object.prototype.hasOwnProperty.call(numericExempt, key)) {
+        formatNotes.push(`${key}: EXEMPT (${numericExempt[key]})  [${srcNums.join(", ") || "none"}] -> [${outNums.join(", ") || "none"}]`);
+      } else {
+        problems.push(line);
+      }
     } else if (srcNums.join("|") !== outShown.join("|")) {
-      // Same values, different presentation -- correct localization.
-      formatNotes.push(`${key}: ${srcNums.join(", ")} -> ${outShown.join(", ")}`);
+      // Same figures, different presentation or clause order -- correct
+      // localization, but surfaced so a reviewer can confirm it at a glance.
+      const reordered = sortedNums(srcNums).join("|") === sortedNums(outShown).join("|");
+      formatNotes.push(
+        `${key}: ${srcNums.join(", ")} -> ${outShown.join(", ")}${reordered ? "  (reordered)" : ""}`,
+      );
     }
 
     const srcEmoji = emojiCodepoints(en);
@@ -477,37 +530,46 @@ async function main() {
     process.exit(1);
   }
 
-  const source = readJson(SOURCE);
-  if (!source) throw new Error(`missing source file: ${SOURCE}`);
-
   const argv = process.argv.slice(2);
   // --force re-translates everything even when the English is unchanged.
   // Needed when something OTHER than the source text changes the output:
   // a new glossary, a change to how placeholders are protected, a fix to
   // the quote-artifact repair.
   const force = argv.includes("--force");
+  const bundleArg = argv.find((a) => a.startsWith("--bundle="));
+  const bundle = bundleArg ? bundleArg.slice("--bundle=".length) : "";
+  const P = bundlePaths(bundle);
   const requested = argv.filter((a) => !a.startsWith("--")).map((a) => a.toLowerCase());
+
+  const source = readJson(P.source);
+  if (!source) throw new Error(`missing source file: ${P.source}`);
+  // Optional, per bundle. Absent means no exemptions.
+  const numericExempt = readJson(P.numericExempt, {}) || {};
+
+
   const langs = requested.length ? requested : Object.keys(TARGETS);
   for (const l of langs) {
     if (!TARGETS[l]) throw new Error(`unknown language "${l}" -- known: ${Object.keys(TARGETS).join(", ")}`);
   }
 
   mkdirSync(LOCALES, { recursive: true });
-  console.log(`source: ${Object.keys(source).length} keys  ->  ${langs.join(", ")}`);
+  console.log(
+    `source: ${Object.keys(source).length} keys${bundle ? ` [${bundle}]` : ""}  ->  ${langs.join(", ")}`,
+  );
 
   const glossarySupport = await supportedGlossaryTargets(key);
   const glossaryCache = readJson(GLOSSARY_CACHE, {}) || {};
 
   let failed = 0;
   for (const lang of langs) {
-    const outPath = join(LOCALES, `${lang}.json`);
-    const overridesPath = join(LOCALES, `${lang}.overrides.json`);
+    const outPath = P.out(lang);
+    const overridesPath = P.overrides(lang);
     // READ ONLY. This script must never write this file.
     const overrides = readJson(overridesPath, {}) || {};
     const previous = readJson(outPath, {}) || {};
     const glossary = await acquireGlossary(key, lang, glossarySupport);
     if (glossary) glossaryCache[lang] = { id: glossary.id, hash: glossary.hash };
-    const snapshotPath = join(LOCALES, `.${lang}.en-snapshot.json`);
+    const snapshotPath = P.snapshot(lang);
     const previousSnapshot = readJson(snapshotPath, {}) || {};
     const previousEn = previousSnapshot.strings || {};
     // A glossary change alters the output without altering the English, so
@@ -593,7 +655,7 @@ async function main() {
       snapshot[k] = source[k];
     }
 
-    const { problems, formatNotes } = validate(lang, source, out);
+    const { problems, formatNotes } = validate(lang, source, out, numericExempt);
     if (formatNotes.length) {
       // Not a failure: the figures match, the locale just writes them
       // differently. Surfaced so a reviewer can tell this apart from a
