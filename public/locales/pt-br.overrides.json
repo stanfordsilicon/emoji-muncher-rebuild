@@ -20,5 +20,11 @@
   ],
   "signed_in_as": "Conectado como {name}",
   "next_round_in": "Próxima rodada em {seconds}…",
-  "all_time_score_summary": "melhor pontuação 🏆 {score} · {games} partidas"
+  "all_time_score_summary": "melhor pontuação 🏆 {score} · {games} partidas",
+  "back_to_launchpad": "VOLTAR À BASE",
+  "username_placeholder": "ex. sid",
+  "stat_games_played": "Partidas jogadas",
+  "stat_last_played": "Última partida",
+  "round_one_banner": "Coma os emojis que combinam com a palavra-chave — os demais custam uma vida. Corra até a 🚩!",
+  "persistent_hint": "Use as setas para se mover. Corra até a 🚩!"
 }

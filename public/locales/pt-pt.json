@@ -1,10 +1,10 @@
 {
   "app_title": "😋 Emoji Munchers",
   "app_tagline": "Come todos os emojis que correspondam à palavra-chave. Os restantes custam uma vida.",
-  "back_to_launchpad": "VOLTAR À PLATAFORMA DE LANÇAMENTO",
+  "back_to_launchpad": "VOLTAR À BASE",
   "loading": "A CARREGAR",
   "username_label": "Nome de utilizador",
-  "username_placeholder": "por exemplo, sid",
+  "username_placeholder": "ex. sid",
   "play_button": "Jogar",
   "username_required_error": "Introduz primeiro um nome de utilizador.",
   "connection_error": "Erro de ligação — tenta novamente.",

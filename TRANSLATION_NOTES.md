@@ -60,3 +60,47 @@ as an adjective of *games* in all five languages. The overrides above patch
 each language, but the English source is the actual defect and a reworded
 English string is pending review. When it lands, revisit these five rows —
 an override silently keeps winning even after its English is fixed.
+
+## Adopted from Sid's translations
+
+Sid (@HtchHiker42) hand-translated these games independently. His strings were
+superseded by the pipeline, but not before diffing them key by key against mine.
+Where his read better, his is used — credited here rather than relabelled as my
+own work. **These are Sid's words and are still unverified by a native speaker.**
+
+He caught four things I had genuinely got wrong or missed: a French
+`make_host_button` I fixed in two other languages but not French, a formal
+`Réessayez` and `Commencez` that slipped past my own register pass, a Russian
+`в {seconds}` that means *at 5* rather than *in 5 seconds*, and the pt-br
+sports-fixture register I fixed everywhere except pt-br.
+
+His systematic weaknesses, which is why the rest was not adopted: Title Case
+applied to Spanish, French, Portuguese and Russian (none of which use it),
+formal register throughout Russian, and translating the game's own name.
+
+Adopted here: **20** strings from Sid, plus
+**1** of my own that this comparison exposed.
+
+| Lang | Key | Why | Value | Source |
+|---|---|---|---|---|
+| `es` | `back_to_launchpad` | Sid's is far shorter and reads as arcade language. Mine (`VOLVER A LA PLATAFORMA DE LANZAMIENTO`) was the string I measured overflowing its button at 375px by up to 85%, so this fixes a real layout bug as well. | `VOLVER A LA BASE` | **from Sid** (his translation, unverified) |
+| `es` | `game_over_title` | Sid's `Fin del Juego` reads as a heading where mine (`Se acabó el juego`) is a sentence; adopted the phrasing in sentence case. | `Fin del juego` | claude-corrected, unverified |
+| `es` | `persistent_hint` | Same feminine agreement for the flag, and shorter. | `Usa las flechas para moverte. ¡Corre hacia la 🚩!` | **from Sid** (his translation, unverified) |
+| `es` | `round_one_banner` | Sid agrees the article with *bandera*/*bandeira* (feminine): `la 🚩` / `a 🚩`. Mine used the masculine. | `Come los emojis que coincidan con la palabra clave — los demás te cuestan una vida. ¡Corre hacia la 🚩!` | **from Sid** (his translation, unverified) |
+| `es` | `username_placeholder` | Shorter, which suits a placeholder. | `ej. sid` | **from Sid** (his translation, unverified) |
+| `fr` | `back_to_launchpad` | Sid's is far shorter and reads as arcade language. Mine (`VOLVER A LA PLATAFORMA DE LANZAMIENTO`) was the string I measured overflowing its button at 375px by up to 85%, so this fixes a real layout bug as well. | `RETOUR À LA BASE` | **from Sid** (his translation, unverified) |
+| `fr` | `loading` | `CHARGEMENT` matches the English's length; mine (`CHARGEMENT EN COURS`) was 172% longer and at risk of overflow. | `CHARGEMENT` | **from Sid** (his translation, unverified) |
+| `fr` | `username_placeholder` | Shorter, which suits a placeholder. | `ex. sid` | **from Sid** (his translation, unverified) |
+| `fr` | `username_required_error` | **Mine was formal** (`Commencez par saisir`). Sid's is informal. | `Entre d'abord un nom d'utilisateur.` | **from Sid** (his translation, unverified) |
+| `pt-br` | `back_to_launchpad` | Sid's is far shorter and reads as arcade language. Mine (`VOLVER A LA PLATAFORMA DE LANZAMIENTO`) was the string I measured overflowing its button at 375px by up to 85%, so this fixes a real layout bug as well. | `VOLTAR À BASE` | **from Sid** (his translation, unverified) |
+| `pt-br` | `persistent_hint` | Same feminine agreement for the flag, and shorter. | `Use as setas para se mover. Corra até a 🚩!` | **from Sid** (his translation, unverified) |
+| `pt-br` | `round_one_banner` | Sid agrees the article with *bandera*/*bandeira* (feminine): `la 🚩` / `a 🚩`. Mine used the masculine. | `Coma os emojis que combinam com a palavra-chave — os demais custam uma vida. Corra até a 🚩!` | **from Sid** (his translation, unverified) |
+| `pt-br` | `stat_games_played` | **I missed pt-br.** I fixed the sports-fixture register (`Jogos disputados`) in fr/es/ru but not here. | `Partidas jogadas` | **from Sid** (his translation, unverified) |
+| `pt-br` | `stat_last_played` | Same miss — `Último jogo disputado` is sports-fixture register. | `Última partida` | **from Sid** (his translation, unverified) |
+| `pt-br` | `username_placeholder` | Shorter, which suits a placeholder. | `ex. sid` | **from Sid** (his translation, unverified) |
+| `pt-pt` | `back_to_launchpad` | Sid's is far shorter and reads as arcade language. Mine (`VOLVER A LA PLATAFORMA DE LANZAMIENTO`) was the string I measured overflowing its button at 375px by up to 85%, so this fixes a real layout bug as well. | `VOLTAR À BASE` | **from Sid** (his translation, unverified) |
+| `pt-pt` | `username_placeholder` | Shorter, which suits a placeholder. | `ex. sid` | **from Sid** (his translation, unverified) |
+| `ru` | `all_time_leaderboard_heading` | `Таблица рекордов` is idiomatic and much shorter than mine. | `Таблица рекордов` | **from Sid** (his translation, unverified) |
+| `ru` | `back_to_launchpad` | Sid's is far shorter and reads as arcade language. Mine (`VOLVER A LA PLATAFORMA DE LANZAMIENTO`) was the string I measured overflowing its button at 375px by up to 85%, so this fixes a real layout bug as well. | `ВЕРНУТЬСЯ НА БАЗУ` | **from Sid** (his translation, unverified) |
+| `ru` | `next_round_in` | **Mine was wrong.** `в {seconds}` means *at* 5, not *in* 5 seconds. `через` is correct. | `Следующий раунд через {seconds}…` | **from Sid** (his translation, unverified) |
+| `ru` | `username_placeholder` | Shorter, which suits a placeholder. | `напр. sid` | **from Sid** (his translation, unverified) |
