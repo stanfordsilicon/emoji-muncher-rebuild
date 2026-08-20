@@ -25,5 +25,7 @@
   "next_round_in": "Próxima ronda em {seconds}…",
   "persistent_hint": "Teclas de setas para te moveres. Corre até ao 🚩!",
   "all_time_score_summary": "melhor pontuação 🏆 {score} · {games} partidas",
-  "signed_in_as": "Sessão iniciada como {name}"
+  "signed_in_as": "Sessão iniciada como {name}",
+  "back_to_launchpad": "VOLTAR À BASE",
+  "username_placeholder": "ex. sid"
 }

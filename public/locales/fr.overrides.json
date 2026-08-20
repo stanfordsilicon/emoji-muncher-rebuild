@@ -28,5 +28,9 @@
   "round_one_banner": "Mange les emojis qui correspondent au mot-clé — les autres te coûtent une vie. Fonce vers le 🚩 !",
   "next_round_in": "Prochain tour dans {seconds}…",
   "persistent_hint": "Flèches pour te déplacer. Fonce vers le 🚩 !",
-  "all_time_score_summary": "meilleur score 🏆 {score} · {games} parties"
+  "all_time_score_summary": "meilleur score 🏆 {score} · {games} parties",
+  "back_to_launchpad": "RETOUR À LA BASE",
+  "loading": "CHARGEMENT",
+  "username_placeholder": "ex. sid",
+  "username_required_error": "Entre d'abord un nom d'utilisateur."
 }

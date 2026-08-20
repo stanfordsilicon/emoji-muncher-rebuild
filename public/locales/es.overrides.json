@@ -22,5 +22,10 @@
   "stat_games_played": "Partidas jugadas",
   "stat_last_played": "Última partida",
   "play_again_button": "Volver a jugar",
-  "all_time_score_summary": "mejor puntuación 🏆 {score} · {games} partidas"
+  "all_time_score_summary": "mejor puntuación 🏆 {score} · {games} partidas",
+  "back_to_launchpad": "VOLVER A LA BASE",
+  "username_placeholder": "ej. sid",
+  "round_one_banner": "Come los emojis que coincidan con la palabra clave — los demás te cuestan una vida. ¡Corre hacia la 🚩!",
+  "persistent_hint": "Usa las flechas para moverte. ¡Corre hacia la 🚩!",
+  "game_over_title": "Fin del juego"
 }
