@@ -364,8 +364,47 @@ function sameMultiset(a, b) {
   return a.every((v, i) => v === b[i]);
 }
 
+// Numbers in a factual sentence are load-bearing: "176 icons", "12x12
+// pixels -- 144 dots", "3 kilobytes". A machine translator that drops or
+// alters one turns a true statement false, and neither the token check nor
+// the emoji check can see it. So every figure in the source must appear in
+// the output, in the same order.
+//
+// Locales legitimately REFORMAT numbers -- French and Russian use a comma
+// for the decimal mark and a space for digit grouping, so "1,500.5" may
+// correctly come back as "1 500,5". That is a formatting difference, not a
+// dropped figure, so comparison happens on normalized values and a raw
+// difference is reported separately rather than failing the run.
+const NUMBER_RE = /\d[\d.,\u00A0\u202F\u2009\u2007]*\d|\d/g;
+
+function normalizeNumber(tok) {
+  // Strip every kind of space used for digit grouping.
+  let s = tok.replace(/[\u00A0\u202F\u2009\u2007 ]/g, "");
+  // 1.234.567 or 1,234,567 -> grouping separators, remove them.
+  if (/^\d{1,3}([.,]\d{3})+$/.test(s)) return s.replace(/[.,]/g, "");
+  // Otherwise a single separator is a decimal mark; normalize it to a dot.
+  s = s.replace(/,/g, ".");
+  // Trim a trailing separator ("5." from "5.")
+  return s.replace(/\.$/, "");
+}
+
+function numberSequence(str) {
+  return (str.match(NUMBER_RE) || []).map((t) => t.replace(/[\u00A0\u202F\u2009\u2007 ]/g, ""));
+}
+
+// French and Russian often group digits with an ORDINARY space ("1 500").
+// That can't go in NUMBER_RE, or "12 144 dots" would silently merge into one
+// number. So it's a second, permissive reading tried only when the strict one
+// doesn't match: a plain space counts as grouping only when what follows is
+// exactly three digits not followed by another digit.
+function numberSequenceLoose(str) {
+  const merged = str.replace(/(\d) (\d{3})(?!\d)/g, "$1$2");
+  return numberSequence(merged);
+}
+
 function validate(lang, source, out) {
   const problems = [];
+  const formatNotes = [];
   for (const [key, en] of Object.entries(source)) {
     const got = out[key];
     if (typeof got !== "string" || got.length === 0) {
@@ -379,6 +418,28 @@ function validate(lang, source, out) {
         `${key}: placeholder mismatch -- source has [${srcTokens.join(", ")}], output has [${outTokens.join(", ")}]\n      en: ${en}\n      ${lang}: ${got}`,
       );
     }
+    const srcNums = numberSequence(en);
+    const outNums = numberSequence(got);
+    const srcNorm = srcNums.map(normalizeNumber);
+    const outNorm = outNums.map(normalizeNumber);
+    let matched = sameMultiset(srcNorm, outNorm);
+    let outShown = outNums;
+    if (!matched) {
+      const loose = numberSequenceLoose(got);
+      if (sameMultiset(srcNorm, loose.map(normalizeNumber))) {
+        matched = true;
+        outShown = loose; // grouped with plain spaces -- a format difference
+      }
+    }
+    if (!matched) {
+      problems.push(
+        `${key}: number mismatch -- source has [${srcNums.join(", ") || "none"}], output has [${outNums.join(", ") || "none"}]\n      en: ${en}\n      ${lang}: ${got}`,
+      );
+    } else if (srcNums.join("|") !== outShown.join("|")) {
+      // Same values, different presentation -- correct localization.
+      formatNotes.push(`${key}: ${srcNums.join(", ")} -> ${outShown.join(", ")}`);
+    }
+
     const srcEmoji = emojiCodepoints(en);
     const outEmoji = emojiCodepoints(got);
     if (!sameMultiset(srcEmoji, outEmoji)) {
@@ -388,7 +449,7 @@ function validate(lang, source, out) {
       );
     }
   }
-  return problems;
+  return { problems, formatNotes };
 }
 
 // ---------------------------------------------------------------------
@@ -532,7 +593,14 @@ async function main() {
       snapshot[k] = source[k];
     }
 
-    const problems = validate(lang, source, out);
+    const { problems, formatNotes } = validate(lang, source, out);
+    if (formatNotes.length) {
+      // Not a failure: the figures match, the locale just writes them
+      // differently. Surfaced so a reviewer can tell this apart from a
+      // dropped number at a glance.
+      console.log(`[${lang}] ${formatNotes.length} number(s) reformatted by locale convention:`);
+      for (const n of formatNotes) console.log(`    ${n}`);
+    }
     if (problems.length) {
       console.error(`\n[${lang}] VALIDATION FAILED -- ${outPath} NOT written:`);
       for (const p of problems) console.error(`  - ${p}`);
