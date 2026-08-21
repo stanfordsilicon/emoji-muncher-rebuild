@@ -762,29 +762,38 @@
   // unbounded behind that one stuck request, and everything queued behind
   // it then fires in a rapid-fire burst once it finally clears, which reads
   // as exactly the same "glitchy, ignores input" symptom the throttle above
-  // is meant to prevent. Trimming from the front drops the *oldest* still-
-  // queued moves, keeping the most recent ones -- i.e. keeping the
-  // direction the player is actually pressing *now*, not the one from
-  // however many steps ago the backlog started. The server's authoritative
-  // position ends up a few cells short of wherever the optimistic display
-  // predicted (predictMove already rendered every press, dropped or not),
-  // but that's a small, bounded, one-time gap that the next confirmed
-  // snapshot self-corrects -- not a growing debt that keeps paying itself
-  // off after the key is released.
+  // is meant to prevent.
+  //
+  // This used to queue every throttled-through keypress and then trim
+  // *already-queued* moves from the front once the backlog grew past the
+  // cap. But predictMove (below) had already rendered each of those moves
+  // by the time it got trimmed -- the muncher visibly walked over that
+  // cell's emoji -- while the trimmed direction itself was never sent to
+  // /api/move, so resolveMunch never ran for it server-side: no score, no
+  // life lost, no eat animation, nothing. On a real deployment (serverless
+  // + Mongo, 100-400ms+ round trips per the comment on MOVE_RETRY_DELAYS_MS
+  // above) that's not a rare edge case -- a single held arrow key easily
+  // outpaces round-trip time and hits this every few steps, which is
+  // exactly "collision doesn't work, the player goes right over an emoji
+  // square and it doesn't work" from the player's side.
+  //
+  // Refusing new moves once the queue is already full instead -- rather
+  // than accepting them and quietly dropping an older one -- keeps the same
+  // bounded-backlog guarantee (a held key still can't queue unboundedly)
+  // but never renders a step that won't actually be resolved: a saturated
+  // queue now reads as the muncher briefly pausing, not ghosting through a
+  // square.
   const MOVE_QUEUE_CAP = 3;
 
   function sendMove(dir) {
     if (amRoundDone()) return;
     const now = Date.now();
     if (now - lastMoveSentAt < CLIENT_MOVE_THROTTLE_MS) return;
+    if (moveQueue.length >= MOVE_QUEUE_CAP) return;
     lastMoveSentAt = now;
     predictMove(dir);
     pendingMoveCount += 1;
     moveQueue.push(dir);
-    while (moveQueue.length > MOVE_QUEUE_CAP) {
-      moveQueue.shift();
-      settleOneMove();
-    }
     pumpMoveQueue();
   }
 
