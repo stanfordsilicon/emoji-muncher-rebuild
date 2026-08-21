@@ -38,6 +38,23 @@ app.get("/api/leaderboard", async (req, res) => {
   res.json({ leaderboard: await scoreRepository.getLeaderboard(20) });
 });
 
+// TEMPORARY diagnostic route -- remove once the room-read-inconsistency
+// investigation is done. Reports which storage backend and Mongo db/URI
+// shape THIS specific serverless instance resolved, so hitting it
+// repeatedly can reveal whether different instances are disagreeing.
+app.get("/api/_debug-backend", async (req, res) => {
+  const { DATA_BACKEND } = require("./data");
+  const uri = process.env.MONGODB_URI || "";
+  res.json({
+    DATA_BACKEND,
+    DATA_BACKEND_env: process.env.DATA_BACKEND || null,
+    hasMongoUri: !!process.env.MONGODB_URI,
+    mongoUriHash: uri ? require("crypto").createHash("sha256").update(uri).digest("hex").slice(0, 12) : null,
+    dbName: process.env.MONGODB_DB_NAME || "emojimunchers_data",
+    pid: process.pid,
+  });
+});
+
 function normId(value) {
   return String(value || "").trim();
 }
