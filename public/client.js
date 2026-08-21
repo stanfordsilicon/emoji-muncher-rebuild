@@ -633,13 +633,18 @@
     return !!(me && me.roundDone);
   }
 
-  // Purely a client-side request-rate throttle so holding a key down
-  // doesn't fire a POST for every OS key-repeat tick (which can be much
-  // faster than any real human tap) -- the server remains the sole
-  // authority on whether a move is accepted, and no longer paces moves on
-  // its own (MOVE_COOLDOWN_MS defaults to 0), so this stays well under any
-  // real tap cadence rather than mirroring a server-side cooldown.
-  const CLIENT_MOVE_THROTTLE_MS = 40;
+  // Client-side request-rate throttle so holding a key down doesn't fire a
+  // POST for every OS key-repeat tick (which can be much faster than any
+  // real human tap). This also has to stay under the queue's actual drain
+  // rate (see moveQueue below): each queued move waits for a full
+  // request/response round trip -- routinely 50-200ms+ against a real
+  // deployment (serverless + Mongo), not just on a cold start -- so a
+  // throttle much faster than that lets a held key keep enqueueing moves
+  // faster than they can ever be sent, building an ever-growing backlog
+  // that then keeps firing (and visibly moving the muncher) well after the
+  // key is released. 90ms comfortably clears typical round-trip time while
+  // still being far faster than a human can perceive as sluggish.
+  const CLIENT_MOVE_THROTTLE_MS = 90;
   let lastMoveSentAt = 0;
 
   // A move can come back !ok for a purely transient reason -- e.g. a cold
@@ -751,6 +756,23 @@
     renderMunchers(lastPlayers);
   }
 
+  // Backstop for when a single request genuinely stalls (a slow cold start,
+  // a full multi-attempt retry chain) rather than just running a bit slower
+  // than the throttle expects -- without this, moveQueue can still grow
+  // unbounded behind that one stuck request, and everything queued behind
+  // it then fires in a rapid-fire burst once it finally clears, which reads
+  // as exactly the same "glitchy, ignores input" symptom the throttle above
+  // is meant to prevent. Trimming from the front drops the *oldest* still-
+  // queued moves, keeping the most recent ones -- i.e. keeping the
+  // direction the player is actually pressing *now*, not the one from
+  // however many steps ago the backlog started. The server's authoritative
+  // position ends up a few cells short of wherever the optimistic display
+  // predicted (predictMove already rendered every press, dropped or not),
+  // but that's a small, bounded, one-time gap that the next confirmed
+  // snapshot self-corrects -- not a growing debt that keeps paying itself
+  // off after the key is released.
+  const MOVE_QUEUE_CAP = 3;
+
   function sendMove(dir) {
     if (amRoundDone()) return;
     const now = Date.now();
@@ -759,6 +781,10 @@
     predictMove(dir);
     pendingMoveCount += 1;
     moveQueue.push(dir);
+    while (moveQueue.length > MOVE_QUEUE_CAP) {
+      moveQueue.shift();
+      settleOneMove();
+    }
     pumpMoveQueue();
   }
 
