@@ -570,32 +570,7 @@
   let appliedVersion = -1;
   function applySnapshotIfFresh(view) {
     if (typeof view.version === "number" && view.version < appliedVersion) return;
-
     appliedVersion = view.version;
-
-    // An in-flight optimistic move (see predictMove below) can race against
-    // the independent poll loop: a poll response can land *between* the
-    // optimistic prediction and that move's own response, still carrying
-    // the pre-move position, and would otherwise visibly snap the muncher
-    // back for a moment. While a move is unconfirmed and we're still in the
-    // same round it was made in, pin our own position to the latest local
-    // prediction instead of whatever the snapshot says -- the move's own
-    // response (or a later poll, once pendingMoveCount drops to 0) is what
-    // actually reconciles it. A round transition invalidates any pending
-    // prediction outright (a fresh round respawns everyone server-side).
-    const isSameRoundInProgress =
-      view.status === "playing" && lastRoomView && lastRoomView.status === "playing" && lastRoomView.round === view.round;
-    if (pendingMoveCount > 0 && optimisticPos && isSameRoundInProgress && Array.isArray(view.players)) {
-      const me = view.players.find((p) => p.playerId === myId);
-      if (me && !me.eliminated && !me.roundDone) {
-        me.muncherCol = optimisticPos.col;
-        me.muncherRow = optimisticPos.row;
-      }
-    } else {
-      pendingMoveCount = 0;
-      optimisticPos = null;
-    }
-
     applyRoomSnapshot(view);
   }
 
@@ -633,19 +608,32 @@
     return !!(me && me.roundDone);
   }
 
-  // Client-side request-rate throttle so holding a key down doesn't fire a
-  // POST for every OS key-repeat tick (which can be much faster than any
-  // real human tap). This also has to stay under the queue's actual drain
-  // rate (see moveQueue below): each queued move waits for a full
-  // request/response round trip -- routinely 50-200ms+ against a real
-  // deployment (serverless + Mongo), not just on a cold start -- so a
-  // throttle much faster than that lets a held key keep enqueueing moves
-  // faster than they can ever be sent, building an ever-growing backlog
-  // that then keeps firing (and visibly moving the muncher) well after the
-  // key is released. 90ms comfortably clears typical round-trip time while
-  // still being far faster than a human can perceive as sluggish.
-  const CLIENT_MOVE_THROTTLE_MS = 90;
-  let lastMoveSentAt = 0;
+  // Movement is one tile at a time, strictly serialized: a keypress is
+  // simply ignored while the previous move is still resolving, instead of
+  // predicting the result locally and queueing further presses to fire as
+  // the network allows (as this used to). That prediction/queueing
+  // machinery was the actual source of "choppy, buggy, superdelayed
+  // collision": a move rendered before it was confirmed, a poll landing
+  // between the prediction and its real response, several requests
+  // resolving out of the order they were sent -- each patchable in
+  // isolation, but adding up to a game that could visibly walk the muncher
+  // over a square whose outcome the server never actually computed.
+  // Locking input to one move at a time removes the whole class of races
+  // outright: there is never more than one /api/move in flight, so nothing
+  // can land out of order, and the muncher's position on screen always
+  // comes directly from a confirmed server response -- never a guess.
+  //
+  // The tradeoff is deliberate: movement is a slower, one-press-at-a-time
+  // cadence rather than a fluid real-time glide -- which is also just the
+  // classic grid-arcade feel (Pac-Man, Snake) rather than trying to hide an
+  // HTTP round trip behind a smooth animation.
+  let moveBusy = false;
+
+  // Floors how soon the *next* press can register, even after a fast
+  // response, so the pace stays the same regardless of the network -- a
+  // near-instant localhost and a slow cold serverless start should feel
+  // like the same deliberate rhythm, not "sometimes snappy, sometimes not."
+  const MIN_STEP_MS = 160;
 
   // A move can come back !ok for a purely transient reason -- e.g. a cold
   // serverless instance's Mongo connection momentarily missing a room that
@@ -656,145 +644,40 @@
   // one dropped request, so they're stuck until they happen to try again.
   // Retrying here invisibly is what actually fixes that: almost every
   // failure clears on the very next attempt a few hundred ms later.
-  // Counts unconfirmed optimistic moves (see predictMove) so applySnapshotIfFresh
-  // knows whether to trust an incoming snapshot's position for our own player yet.
-  let pendingMoveCount = 0;
-  let optimisticPos = null; // { col, row }, or null once every predicted move is confirmed
-  function settleOneMove() {
-    pendingMoveCount = Math.max(0, pendingMoveCount - 1);
-    if (pendingMoveCount === 0) optimisticPos = null;
-  }
-
-  // Move requests are serialized -- only one /api/move is ever in flight at
-  // a time, with the rest queued in press order -- rather than each keydown
-  // firing its own independent fetch(). Two (or more) moves genuinely can be
-  // in flight together whenever keys are pressed faster than a round trip
-  // (routine, not an edge case: a cold serverless instance alone can take
-  // 100-400ms+ per the comment below), and nothing tied their *resolution*
-  // order to the order they were sent in -- LobbyManager's mutateRoom retries
-  // each one against "whatever the room looks like right now" on a save-race
-  // loss, with no sequence number to say which move was actually pressed
-  // first. Two overlapping requests could therefore get applied in swapped
-  // order: e.g. press right then down, but "down" resolves at the server
-  // first and "right" second. munch resolution happens at whatever cell the
-  // *server* occupies at the moment each request is actually applied, so the
-  // swap doesn't just reorder two moves that land on the same square either
-  // way -- it can walk the muncher over an entirely different pair of cells
-  // than the ones it visually passed through, silently skipping a poison
-  // tile the player clearly saw themselves cross. That tile then reads as
-  // "already eaten" the next time it's genuinely visited (since the earlier
-  // pass, the one that seemed to do nothing, was the one that never actually
-  // reached the server as that step), which is exactly the "off and back on"
-  // workaround this was producing -- and the next real move, computed from
-  // the server's true (still one step behind) position, visibly snaps the
-  // muncher to a different cell than the one it looked like it was
-  // standing on. Queuing removes the race outright: every move is applied
-  // in the same order it was pressed, so the server's position can never
-  // diverge from what was drawn.
-  let moveInFlight = false;
-  const moveQueue = [];
-
-  function pumpMoveQueue() {
-    if (moveInFlight || moveQueue.length === 0) return;
-    moveInFlight = true;
-    attemptMove(moveQueue.shift(), 0);
-  }
-
   const MOVE_RETRY_DELAYS_MS = [120, 250, 400];
-  function attemptMove(dir, attempt) {
+
+  function unlockAfter(startedAt) {
+    const remaining = Math.max(0, MIN_STEP_MS - (Date.now() - startedAt));
+    setTimeout(() => { moveBusy = false; }, remaining);
+  }
+
+  function attemptMove(dir, attempt, startedAt) {
     api("move", { dir }).then((res) => {
       if (res.ok) {
-        settleOneMove();
         applySnapshotIfFresh(res.room);
-        moveInFlight = false;
-        pumpMoveQueue();
+        unlockAfter(startedAt);
         return;
       }
       if (attempt < MOVE_RETRY_DELAYS_MS.length) {
-        setTimeout(() => attemptMove(dir, attempt + 1), MOVE_RETRY_DELAYS_MS[attempt]);
+        setTimeout(() => attemptMove(dir, attempt + 1, startedAt), MOVE_RETRY_DELAYS_MS[attempt]);
       } else {
-        // Every retry failed -- the move never actually landed server-side,
-        // so the optimistic prediction (predictMove) is now showing a
-        // position/munch that never happened. Previously this just gave up
-        // silently and let the *next* poll (up to 280ms later) or move
-        // response correct it, which is what "sent back to an earlier
-        // square" a moment later actually was. Resyncing immediately here
-        // instead means the correction happens right away, in the same
-        // instant the dropped keypress is given up on, rather than as a
-        // delayed, unexplained snap-back.
-        settleOneMove();
-        moveInFlight = false;
+        // Every retry failed -- resync directly from the room instead of
+        // leaving the player stuck not knowing whether the press landed.
         fetch(`/api/room?code=${encodeURIComponent(currentRoomCode)}`)
           .then((r) => r.json())
           .then((data) => {
             if (data.ok && data.room) applySnapshotIfFresh(data.room);
           })
           .catch(() => {})
-          .finally(pumpMoveQueue);
+          .finally(() => unlockAfter(startedAt));
       }
     });
   }
 
-  // Movement here is only ever clamped at the grid edge -- no walls, no
-  // hidden server-only data -- so the client can predict the exact same
-  // result the server will compute, instead of waiting a full round-trip
-  // (100-400ms+ on a cold serverless instance) before the muncher visibly
-  // moves. This is what actually fixes "arrow keys feel laggy": the token
-  // now moves the instant you press a key, and the network request behind
-  // it just confirms (or, on a real rejection like round-done, corrects)
-  // that a moment later via the normal applySnapshotIfFresh path.
-  const MOVE_DELTAS = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
-  function predictMove(dir) {
-    const delta = MOVE_DELTAS[dir];
-    const me = lastPlayers.find((p) => p.playerId === myId);
-    if (!me || !delta) return;
-    const col = Math.max(0, Math.min(cols - 1, me.muncherCol + delta[0]));
-    const row = Math.max(0, Math.min(rows - 1, me.muncherRow + delta[1]));
-    optimisticPos = { col, row };
-    me.muncherCol = col;
-    me.muncherRow = row;
-    renderMunchers(lastPlayers);
-  }
-
-  // Backstop for when a single request genuinely stalls (a slow cold start,
-  // a full multi-attempt retry chain) rather than just running a bit slower
-  // than the throttle expects -- without this, moveQueue can still grow
-  // unbounded behind that one stuck request, and everything queued behind
-  // it then fires in a rapid-fire burst once it finally clears, which reads
-  // as exactly the same "glitchy, ignores input" symptom the throttle above
-  // is meant to prevent.
-  //
-  // This used to queue every throttled-through keypress and then trim
-  // *already-queued* moves from the front once the backlog grew past the
-  // cap. But predictMove (below) had already rendered each of those moves
-  // by the time it got trimmed -- the muncher visibly walked over that
-  // cell's emoji -- while the trimmed direction itself was never sent to
-  // /api/move, so resolveMunch never ran for it server-side: no score, no
-  // life lost, no eat animation, nothing. On a real deployment (serverless
-  // + Mongo, 100-400ms+ round trips per the comment on MOVE_RETRY_DELAYS_MS
-  // above) that's not a rare edge case -- a single held arrow key easily
-  // outpaces round-trip time and hits this every few steps, which is
-  // exactly "collision doesn't work, the player goes right over an emoji
-  // square and it doesn't work" from the player's side.
-  //
-  // Refusing new moves once the queue is already full instead -- rather
-  // than accepting them and quietly dropping an older one -- keeps the same
-  // bounded-backlog guarantee (a held key still can't queue unboundedly)
-  // but never renders a step that won't actually be resolved: a saturated
-  // queue now reads as the muncher briefly pausing, not ghosting through a
-  // square.
-  const MOVE_QUEUE_CAP = 3;
-
   function sendMove(dir) {
-    if (amRoundDone()) return;
-    const now = Date.now();
-    if (now - lastMoveSentAt < CLIENT_MOVE_THROTTLE_MS) return;
-    if (moveQueue.length >= MOVE_QUEUE_CAP) return;
-    lastMoveSentAt = now;
-    predictMove(dir);
-    pendingMoveCount += 1;
-    moveQueue.push(dir);
-    pumpMoveQueue();
+    if (amRoundDone() || moveBusy) return;
+    moveBusy = true;
+    attemptMove(dir, 0, Date.now());
   }
 
   const DIR_KEYS = {
