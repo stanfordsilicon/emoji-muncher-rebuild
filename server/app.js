@@ -239,6 +239,33 @@ app.get("/api/room", async (req, res) => {
 
 // Local dev only in practice — on Vercel, requests under /public are served
 // directly by the platform before ever reaching this function.
+// TEMP diagnostic route -- bypasses loadRoom/mutateRoom's retry logic
+// entirely to see what's actually in Mongo for a given code. Remove after
+// diagnosing the "room not found under concurrent poll+move" bug.
+app.get("/api/_debug-room", async (req, res) => {
+  try {
+    const code = String(req.query.code || "").trim().toUpperCase();
+    const { getMongoDb } = require("./data/mongoClient");
+    const db = await getMongoDb();
+    const col = db.collection("rooms");
+    const doc = await col.findOne({ _id: code });
+    const count = await col.countDocuments({ _id: code });
+    res.json({
+      ok: true,
+      code,
+      found: !!doc,
+      countDocuments: count,
+      version: doc && doc.version,
+      status: doc && doc.status,
+      playerOrderLen: doc && doc.playerOrder && doc.playerOrder.length,
+      updatedAt: doc && doc.updatedAt,
+      readPreference: db.readPreference ? db.readPreference.mode : "unknown",
+    });
+  } catch (err) {
+    res.json({ ok: false, error: err.message, stack: err.stack });
+  }
+});
+
 app.use(express.static(path.join(__dirname, "..", "public")));
 
 module.exports = app;
