@@ -58,12 +58,25 @@ function codeFor(playerId) {
 // each other can't clobber one another either; on a lost race it just
 // re-reads, since whoever won already saved the same deterministic
 // (wall-clock-driven) transition.
+//
+// A `store.getRoom` miss retries here too, same as mutateRoom and for the
+// same reason (see its comment) -- a cold serverless instance's fresh Mongo
+// connection can transiently miss a document that genuinely exists. This
+// path used to give up on the very first miss with no retry at all, which
+// is a worse version of exactly the bug mutateRoom's retry was written to
+// fix: /api/room is polled every ~280ms during play, so a single cold miss
+// here was enough to hand the client `room: null` and make an active game
+// look like it had vanished -- indistinguishable, from the player's side,
+// from the room actually being gone. Retrying (and only reporting "not
+// found" once every attempt misses) closes that gap.
 async function loadRoom(rawCode) {
   const code = codeFor(rawCode);
+  let everFoundRoom = false;
   for (let attempt = 0; attempt < MAX_MUTATE_RETRIES; attempt++) {
     await retryDelay(attempt);
     const room = await store.getRoom(code);
-    if (!room) return null;
+    if (!room) continue;
+    everFoundRoom = true;
     const changed = GameRoom.applyLazyStateUpdates(room);
     if (GameRoom.isEmpty(room)) {
       await store.deleteRoom(code);
@@ -72,7 +85,13 @@ async function loadRoom(rawCode) {
     if (!changed) return room;
     const saved = await store.saveRoom(room, room.version);
     if (saved) return saved;
+    // Someone else saved first (a race on the same lazy transition) -- loop
+    // and re-read, same as mutateRoom.
   }
+  if (!everFoundRoom) return null;
+  // Found it at least once but kept losing the save race -- return whatever
+  // is currently there rather than reporting a room that demonstrably
+  // exists as missing.
   return store.getRoom(code);
 }
 

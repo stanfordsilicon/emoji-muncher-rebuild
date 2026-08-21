@@ -250,20 +250,28 @@
   document.getElementById("homeBtnGame").addEventListener("click", goHome);
   document.getElementById("homeBtnOver").addEventListener("click", goHome);
 
-  // Explicit "leaving right now" signal for the common case (closing the
-  // tab) — sendBeacon is used because a plain fetch can get cancelled
-  // mid-flight when the page unloads. The heartbeat timeout on the server
-  // is the fallback for real drops (crash, network loss) where this never
-  // fires.
-  window.addEventListener("pagehide", () => {
-    if (!currentRoomCode || !navigator.sendBeacon) return;
-    try {
-      const blob = new Blob([JSON.stringify({ code: currentRoomCode, playerId: myId })], { type: "application/json" });
-      navigator.sendBeacon("/api/leave-room", blob);
-    } catch (e) {
-      // best-effort only
-    }
-  });
+  // There used to be a `pagehide` listener here that sent an immediate
+  // sendBeacon leave-room, on the theory that pagehide meant "the tab is
+  // really closing." It doesn't, reliably: a plain page refresh fires
+  // pagehide on the outgoing document too (confirmed directly -- reload
+  // mid-game and the room is gone server-side a moment later), which
+  // directly contradicted getDeviceId()'s own stated intent of surviving a
+  // refresh. Worse, mobile Safari fires pagehide whenever it backgrounds a
+  // tab at all -- switching apps, a notification, the screen locking --
+  // none of which mean the player is actually leaving. On a phone passed
+  // around at a party, that's routine, and each time it happened the
+  // player's game was silently deleted out from under them: every move
+  // after coming back failed with "Room not found," which is exactly what
+  // "the player doesn't get processed" looks like from their side.
+  //
+  // The heartbeat system already handles "player went away" correctly and
+  // gracefully: a missed heartbeat marks them disconnected after
+  // HEARTBEAT_TIMEOUT_MS, the room itself stays alive for DISCONNECT_GRACE_MS
+  // in case they come back (heartbeat/rejoin flips connected back to true),
+  // and only actual prolonged absence cleans it up. An explicit "Go Home"
+  // click (goHome() above) is still an immediate, deliberate leave -- this
+  // is only about not treating an ambiguous, frequently-spurious browser
+  // event as an irreversible one.
 
   function renderGrid(view) {
     cols = view.cols; rows = view.rows;
