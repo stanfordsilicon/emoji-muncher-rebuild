@@ -20,28 +20,31 @@ const { createRoomStore } = require("./store");
 //
 // Measured directly against production (a script that hit /api/create-room
 // then hammered /api/move immediately after): a brand-new Mongo connection
-// on a cold Vercel instance takes on the order of *eight full seconds*
-// before it reliably sees a document that was written (and immediately
-// re-readable via a *warm* connection) moments earlier -- not the "roughly
-// up to a second" this budget used to assume. Every request issued during
-// that window used to exhaust its retries and report "Room not found",
-// silently dropping the player's first several keypresses with zero
-// feedback -- indistinguishable, from their side, from the game being
-// frozen. Once a given serverless instance's connection is warm, every
-// subsequent request against it is fast (sub-100ms, confirmed by the same
-// script run again immediately after) -- this is a one-time per-cold-start
-// cost, not an ongoing steady-state problem, so a generous retry budget
-// here only ever gets fully used on that first request after a cold start.
-const MAX_MUTATE_RETRIES = 20;
+// on a cold Vercel instance can take upwards of *ten seconds* before it
+// reliably sees a document that was written (and instantly re-readable via
+// a *warm* connection) moments earlier -- not the "roughly up to a second"
+// this budget used to assume, and not even reliably covered by an earlier
+// pass at this fix that budgeted ~9s (still measured failing past that on
+// a later cold instance). Every request issued during that window used to
+// exhaust its retries and report "Room not found", silently dropping the
+// player's first several keypresses with zero feedback -- indistinguishable,
+// from their side, from the game being frozen. Once a given serverless
+// instance's connection is warm, every subsequent request against *that*
+// instance is fast (sub-100ms) -- but Vercel doesn't guarantee the next
+// request lands on the same instance, so more than one of a single
+// player's early moves can each independently pay this cost against a
+// different cold instance. vercel.json's maxDuration is raised well above
+// this budget's worst case to give it room to actually run.
+const MAX_MUTATE_RETRIES = 32;
 
 // Delay before each retry (attempt 0 fires immediately, no wait). A short,
 // increasing backoff (capped, with a little jitter so several requests
-// retrying in lockstep don't keep landing on each other) spreads the 20
-// attempts across roughly up to nine seconds -- enough to cover the cold
-// start measured above -- while adding no delay at all to the common case
-// where the very first attempt already succeeds.
+// retrying in lockstep don't keep landing on each other) spreads the 32
+// attempts across roughly up to eighteen seconds -- comfortable margin over
+// the worst cold start measured above -- while adding no delay at all to
+// the common case where the very first attempt already succeeds.
 const RETRY_BASE_DELAY_MS = 40;
-const RETRY_MAX_DELAY_MS = 600;
+const RETRY_MAX_DELAY_MS = 700;
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
