@@ -173,6 +173,7 @@
   const roundOneBannerEl = document.getElementById("roundOneBanner");
   const myScoreValEl = document.getElementById("myScoreVal");
   const myLivesEl = document.getElementById("myLives");
+  const connectingNoteEl = document.getElementById("connectingNote");
 
   let cellSize = 58;
   let cols = 9, rows = 7;
@@ -238,6 +239,7 @@
     await api("leave-room", {});
     stopPolling();
     stopHeartbeat();
+    hideConnectingNote();
     currentRoomCode = null;
     lastRoomView = null;
     colorByPlayer.clear();
@@ -687,9 +689,31 @@
   const MOVE_SAFETY_NET_MS = 3000;
   let moveSafetyNetTimer = null;
 
+  // A move can genuinely take a few seconds to confirm -- not from network
+  // jitter, but from the server's own room lookup retrying through a cold
+  // serverless/database connection warming up (see server/game/
+  // LobbyManager.js's mutateRoom comment: measured at up to ~8s on a cold
+  // start, one-time per warm-up, then fast). Without this note, that wait
+  // was entirely silent -- the touchpad just re-enables after
+  // MOVE_SAFETY_NET_MS with nothing having visibly happened, which reads
+  // exactly like the game having frozen. Delayed rather than shown
+  // immediately so the overwhelmingly common fast case never flickers it.
+  const CONNECTING_NOTE_DELAY_MS = 1200;
+  let connectingNoteTimer = null;
+
+  function showConnectingNote() {
+    connectingNoteEl.classList.remove("hidden");
+  }
+  function hideConnectingNote() {
+    clearTimeout(connectingNoteTimer);
+    connectingNoteTimer = null;
+    connectingNoteEl.classList.add("hidden");
+  }
+
   function unlock() {
     clearTimeout(moveSafetyNetTimer);
     moveSafetyNetTimer = null;
+    hideConnectingNote();
     moveBusy = false;
     setTouchpadBusy(false);
   }
@@ -747,6 +771,7 @@
     setTouchpadBusy(true);
     flashTouchpadButton(dir);
     moveSafetyNetTimer = setTimeout(unlock, MOVE_SAFETY_NET_MS);
+    connectingNoteTimer = setTimeout(showConnectingNote, CONNECTING_NOTE_DELAY_MS);
     attemptMove(dir, 0, Date.now());
   }
 

@@ -420,6 +420,18 @@ input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 10px v
   margin: -4px 0 10px;
 }
 
+/* Shown when a move is taking noticeably longer than usual to confirm
+   (see client.js's sendMove) -- almost always a cold serverless/DB
+   connection warming up on the very first move or two of a session, not a
+   dropped keypress. Without this, that wait looked exactly like the game
+   having silently frozen. */
+.connecting-note {
+  text-align: center;
+  color: var(--ink-soft);
+  font-size: 13px;
+  margin-top: 4px;
+}
+
 /* ---- accounts ---- */
 .account-box { margin-top: 16px; border-top: 1px solid var(--panel-line); padding-top: 12px; text-align: left; }
 .link-btn {
