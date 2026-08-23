@@ -327,13 +327,52 @@ input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 10px v
 }
 
 #hint { text-align: center; color: var(--ink-soft); font-size: 13px; margin-top: 4px; }
+
+/* Always shown now, not just under 700px -- this is the primary way to
+   move (see client.js's sendMove: clicks and arrow keys are the exact same
+   code path), not a mobile-only fallback for players without a keyboard.
+   Sized and styled to actually invite clicking rather than reading as an
+   afterthought: bigger targets, a real accent-colored press state, and a
+   center gap so it reads as a d-pad at a glance instead of six identical
+   squares. */
 #touchpad {
-  display: none; margin-top: 10px;
-  grid-template-columns: repeat(3, 52px); grid-template-rows: repeat(2, 52px);
-  gap: 6px; justify-content: center;
+  display: grid;
+  margin-top: 14px;
+  grid-template-columns: repeat(3, 64px);
+  grid-template-rows: repeat(2, 64px);
+  gap: 8px;
+  justify-content: center;
 }
-#touchpad button { font-size: 20px; border-radius: 8px; border: 2px solid var(--panel-line); background: var(--panel); color: var(--ink); }
-@media (max-width: 700px) { #touchpad { display: grid; } }
+#touchpad button {
+  font-size: 26px;
+  border-radius: 12px;
+  border: 2px solid var(--panel-line);
+  background: var(--panel);
+  color: var(--ink);
+  cursor: pointer;
+  transition: transform 0.06s ease, border-color 0.12s ease, background 0.12s ease;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+#touchpad button:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+/* .is-pressed is toggled from JS on click/keydown-equivalent, not just
+   :active -- a move waits out MIN_STEP_MS (client.js) before the next one
+   is allowed, so without this a click during that window would look like
+   it did nothing at all rather than "registered, please wait a beat." */
+#touchpad button:active,
+#touchpad button.is-pressed {
+  transform: scale(0.9);
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--bg-deep);
+}
+#touchpad button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
 
 .final-score {
   font-family: var(--pixel-font);

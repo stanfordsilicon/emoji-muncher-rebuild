@@ -646,9 +646,19 @@
   // failure clears on the very next attempt a few hundred ms later.
   const MOVE_RETRY_DELAYS_MS = [120, 250, 400];
 
+  // Disabling the touchpad's buttons while a move is in flight (rather than
+  // just relying on sendMove's moveBusy no-op) gives a click during that
+  // window real visual feedback -- "registered, briefly waiting" instead of
+  // looking like the click did nothing, which is exactly the "unresponsive"
+  // read this whole change is meant to avoid.
+  const touchpadButtons = Array.from(document.querySelectorAll("#touchpad button[data-dir]"));
+  function setTouchpadBusy(busy) {
+    touchpadButtons.forEach((b) => { b.disabled = busy; });
+  }
+
   function unlockAfter(startedAt) {
     const remaining = Math.max(0, MIN_STEP_MS - (Date.now() - startedAt));
-    setTimeout(() => { moveBusy = false; }, remaining);
+    setTimeout(() => { moveBusy = false; setTouchpadBusy(false); }, remaining);
   }
 
   function attemptMove(dir, attempt, startedAt) {
@@ -674,9 +684,23 @@
     });
   }
 
+  // Flashes the matching on-screen button for a keyboard-triggered move too
+  // (not just an actual click), so the touchpad reads as "the same input,
+  // shown on screen" rather than a separate, disconnected control -- makes
+  // it obvious at a glance that clicking it does exactly what the arrow
+  // keys do.
+  function flashTouchpadButton(dir) {
+    const btn = touchpadButtons.find((b) => b.dataset.dir === dir);
+    if (!btn) return;
+    btn.classList.add("is-pressed");
+    setTimeout(() => btn.classList.remove("is-pressed"), 120);
+  }
+
   function sendMove(dir) {
     if (amRoundDone() || moveBusy) return;
     moveBusy = true;
+    setTouchpadBusy(true);
+    flashTouchpadButton(dir);
     attemptMove(dir, 0, Date.now());
   }
 
