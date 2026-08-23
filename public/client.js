@@ -570,8 +570,25 @@
   let appliedVersion = -1;
   function applySnapshotIfFresh(view) {
     if (typeof view.version === "number" && view.version < appliedVersion) return;
-    appliedVersion = view.version;
-    applyRoomSnapshot(view);
+    // appliedVersion only advances *after* a successful render, not before
+    // -- this used to be the other way around, which meant a rendering
+    // exception (a bug, not a network hiccup) still marked that version as
+    // "handled." Every future poll for the same still-current version then
+    // saw nothing new to do and silently kept the screen exactly as it was
+    // at the moment of the crash forever: the round timer visibly hits
+    // zero, a round-end/game-over/next-round transition is sitting right
+    // there in the response, and nothing on screen ever moves again. Not
+    // advancing until render() actually returns means a poll that fails
+    // this way keeps retrying the *same* transition on every subsequent
+    // tick instead of giving up on it -- self-healing if whatever caused
+    // the throw was transient, and logged (see catch below) instead of
+    // silently swallowed either way.
+    try {
+      applyRoomSnapshot(view);
+      appliedVersion = view.version;
+    } catch (err) {
+      console.error("Failed to render room update -- will retry next poll:", err);
+    }
   }
 
   // ---- room snapshot dispatch ----
@@ -656,16 +673,44 @@
     touchpadButtons.forEach((b) => { b.disabled = busy; });
   }
 
+  // unlock() is the only thing standing between "one move resolved" and the
+  // player being able to press another key or click the pad at all --
+  // moveBusy gates *both* input paths (sendMove's own early-return, and
+  // setTouchpadBusy's disabled attribute). It has to run unconditionally
+  // once a move is done resolving, no matter what else happens in the same
+  // tick, or input locks up permanently: not "briefly unresponsive," but
+  // genuinely stuck until a full page reload. A hard ceiling timeout is a
+  // second, independent path to the same unlock -- if literally anything
+  // else goes wrong (a render throws, a promise chain never settles, a bug
+  // neither of us has thought of yet), this fires anyway. Cleared on every
+  // real unlock so it doesn't also fire pointlessly later.
+  const MOVE_SAFETY_NET_MS = 3000;
+  let moveSafetyNetTimer = null;
+
+  function unlock() {
+    clearTimeout(moveSafetyNetTimer);
+    moveSafetyNetTimer = null;
+    moveBusy = false;
+    setTouchpadBusy(false);
+  }
+
   function unlockAfter(startedAt) {
     const remaining = Math.max(0, MIN_STEP_MS - (Date.now() - startedAt));
-    setTimeout(() => { moveBusy = false; setTouchpadBusy(false); }, remaining);
+    setTimeout(unlock, remaining);
   }
 
   function attemptMove(dir, attempt, startedAt) {
     api("move", { dir }).then((res) => {
       if (res.ok) {
-        applySnapshotIfFresh(res.room);
-        unlockAfter(startedAt);
+        // Rendering the response is exactly the kind of "should never fail,
+        // but might" step a lockup like this comes from -- try/finally means
+        // even a rendering bug here still lets the next move through, rather
+        // than also taking input down with it.
+        try {
+          applySnapshotIfFresh(res.room);
+        } finally {
+          unlockAfter(startedAt);
+        }
         return;
       }
       if (attempt < MOVE_RETRY_DELAYS_MS.length) {
@@ -701,6 +746,7 @@
     moveBusy = true;
     setTouchpadBusy(true);
     flashTouchpadButton(dir);
+    moveSafetyNetTimer = setTimeout(unlock, MOVE_SAFETY_NET_MS);
     attemptMove(dir, 0, Date.now());
   }
 
