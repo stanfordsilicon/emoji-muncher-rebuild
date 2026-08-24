@@ -323,6 +323,25 @@ function advanceAfterDelay(room) {
   room.nextRoundAt = Date.now() + config.NEXT_ROUND_PAUSE_MS;
 }
 
+// The clock running out used to advance straight to "roundEnd" with no
+// other consequence -- identical, from the player's side, to actually
+// reaching the flag: same "Next round in Xs" message, same no-penalty
+// outcome. Costing a life here (same as eating a wrong emoji -- see
+// resolveMunch) makes running out of time an actual failure instead of a
+// silent freebie, and marks the player roundDone so maybeAdvanceRound's
+// "is everyone done" check still holds for a solo player whose only
+// outstanding player just timed out.
+function penalizeTimedOutPlayers(room) {
+  for (const id of room.playerOrder) {
+    const player = room.players[id];
+    if (!player || player.eliminated || player.roundDone) continue;
+    player.lives -= 1;
+    if (player.lives <= 0) player.eliminated = true;
+    player.roundDone = true;
+    if (player.currentRoundEntry) player.currentRoundEntry.timedOut = true;
+  }
+}
+
 function emojiMetaForGrid(grid, keyword, repo) {
   const seen = new Map();
   for (const cell of grid) {
@@ -514,7 +533,12 @@ function applyLazyStateUpdates(room) {
   const now = Date.now();
 
   if (room.status === "playing" && room.roundEndsAt && now >= room.roundEndsAt) {
-    advanceAfterDelay(room);
+    penalizeTimedOutPlayers(room);
+    if (activePlayers(room).length === 0 && room.playerOrder.length > 0) {
+      endGame(room);
+    } else {
+      advanceAfterDelay(room);
+    }
     changed = true;
   } else if (room.status === "roundEnd" && room.nextRoundAt && now >= room.nextRoundAt) {
     nextRound(room);

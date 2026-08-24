@@ -24,6 +24,27 @@ function key(col, row) {
   return `${col},${row}`;
 }
 
+// A plain self-avoiding walk (never revisit a cell) can still run right
+// alongside an earlier stretch of itself -- two turns of the same path
+// ending up grid-adjacent, one cell apart in the *sequence* but touching in
+// the *grid* -- which quietly opens a shortcut between two points on what's
+// supposed to be a single 1-wide corridor with exactly one route through
+// it. Rejecting any next step that would touch a visited cell OTHER than
+// the one it's stepping from keeps the corridor from ever running next to
+// itself, so the walk it produces is a true simple path: no braids, no
+// alternate way through.
+function touchesOnlyPredecessor(nx, ny, visited, predecessorKey, cols, rows) {
+  for (const [dc, dr] of NEIGHBOR_DELTAS) {
+    const ax = nx + dc;
+    const ay = ny + dr;
+    if (ax < 0 || ax >= cols || ay < 0 || ay >= rows) continue;
+    const ak = key(ax, ay);
+    if (ak === predecessorKey) continue;
+    if (visited.has(ak)) return false;
+  }
+  return true;
+}
+
 function neighborsOf(cell, cols, rows) {
   const result = [];
   for (const [dc, dr] of NEIGHBOR_DELTAS) {
@@ -75,7 +96,7 @@ function pickDestination(cols, rows) {
  */
 function selfAvoidingWalk(cols, rows, start, target, maxAttempts = 400) {
   const directDistance = Math.abs(start.col - target.col) + Math.abs(start.row - target.row);
-  const maxLength = directDistance + 6;
+  const maxLength = directDistance * 2 + 4;
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     let x = start.col;
@@ -99,8 +120,14 @@ function selfAvoidingWalk(cols, rows, start, target, maxAttempts = 400) {
         const ny = y + dr;
         if (nx < 0 || nx >= cols || ny < 0 || ny >= rows) continue;
         if (visited.has(key(nx, ny))) continue;
+        if (!touchesOnlyPredecessor(nx, ny, visited, key(x, y), cols, rows)) continue;
         const distAfter = Math.abs(nx - target.col) + Math.abs(ny - target.row);
-        const weight = distAfter < distNow ? 6 : 1;
+        // A much gentler pull toward the goal than the old 6:1 (was
+        // producing short, nearly-straight shots) -- 2:1 still reliably
+        // finds the target within maxLength, but wanders and backtracks on
+        // its way there far more often, which is what "convoluted, not a
+        // straight line" actually needs.
+        const weight = distAfter < distNow ? 2 : 1;
         available.push({ dir, nx, ny, weight });
       }
 
@@ -185,44 +212,65 @@ function addDeadEndSpur(blob, mainPath, cols, rows) {
   let cur = mainPath[1 + Math.floor(Math.random() * (mainPath.length - 2))];
   const spurLength = 2 + Math.floor(Math.random() * 3); // 2-4 cells
   const spurCells = [];
+  const spurKeys = new Set();
   for (let step = 0; step < spurLength; step++) {
+    const curKey = key(cur.col, cur.row);
     const candidates = neighborsOf(cur, cols, rows).filter((nb) => {
       const k = key(nb.col, nb.row);
-      return !blob.has(k) && !spurCells.some((c) => c.col === nb.col && c.row === nb.row);
+      if (blob.has(k) || spurKeys.has(k)) return false;
+      // Same non-adjacency rule as the main corridor (see
+      // touchesOnlyPredecessor): a spur that grazes a second point on the
+      // main path, or curls back against itself, quietly opens a second
+      // way onto/off the real route instead of staying a dead end.
+      return touchesOnlyPredecessor(nb.col, nb.row, blob, curKey, cols, rows)
+        && touchesOnlyPredecessor(nb.col, nb.row, spurKeys, curKey, cols, rows);
     });
     if (candidates.length === 0) break;
     cur = candidates[Math.floor(Math.random() * candidates.length)];
     spurCells.push(cur);
+    spurKeys.add(key(cur.col, cur.row));
   }
   for (const cell of spurCells) blob.set(key(cell.col, cell.row), cell);
 }
 
-const SPURS_PER_CORNER_MIN = 1;
-const SPURS_PER_CORNER_MAX = 2;
+const SPURS_MIN = 3;
+const SPURS_MAX = 5;
 
 /**
  * Builds one full board-layout pattern: a single self-avoiding main path
- * from every spawn corner to a shared destination, plus a couple of
- * dead-end spurs per corner branching off that path. Returns null if any
- * corner's main path can't be built or the resulting board somehow isn't
- * solvable for every corner -- the caller (getPatternPool) just tries
- * again, since this only runs at pool-build time, not per round.
+ * from the spawn corner to a destination, plus several dead-end spurs
+ * branching off that path. Returns null if the main path can't be built or
+ * the resulting board somehow isn't solvable -- the caller (getPatternPool)
+ * just tries again, since this only runs at pool-build time, not per round.
+ *
+ * Only corner 0 gets a real path: GameRoom.js's own CORNERS[i % 4] lookup
+ * never advances `i` past 0 (every real room holds exactly one player --
+ * see GameRoom.js's own "single-player only" comment), so a spawn corner
+ * other than the top-left one is never actually used. This used to build a
+ * full path-plus-spurs from all 4 corners into one shared blob regardless,
+ * which meant the *actual* board a player saw had three other corners'
+ * worth of "safe" cells sitting on it that just happened to be reachable
+ * from their own position too -- genuine alternate routes to the flag, not
+ * decoys, since they were real solved paths. That was the biggest single
+ * reason the maze read as "too easy, multiple correct ways through": the
+ * blob is now built from exactly one walk, so every safe cell not on that
+ * one corridor is either an intentional dead-end spur (see
+ * addDeadEndSpur -- doesn't reconnect, doesn't reach the destination) or
+ * doesn't exist at all.
  */
 function buildPattern(cols, rows) {
   const destination = pickDestination(cols, rows);
   const blob = new Map([[key(destination.col, destination.row), destination]]);
-  const corners = spawnCorners(cols, rows);
+  const corner = spawnCorners(cols, rows)[0];
 
-  for (const corner of corners) {
-    const walk = selfAvoidingWalk(cols, rows, corner, destination);
-    if (!walk) return null;
-    for (const cell of walk) blob.set(key(cell.col, cell.row), cell);
-    const spurCount = SPURS_PER_CORNER_MIN + Math.floor(Math.random() * (SPURS_PER_CORNER_MAX - SPURS_PER_CORNER_MIN + 1));
-    for (let i = 0; i < spurCount; i++) addDeadEndSpur(blob, walk, cols, rows);
-  }
+  const walk = selfAvoidingWalk(cols, rows, corner, destination);
+  if (!walk) return null;
+  for (const cell of walk) blob.set(key(cell.col, cell.row), cell);
+  const spurCount = SPURS_MIN + Math.floor(Math.random() * (SPURS_MAX - SPURS_MIN + 1));
+  for (let i = 0; i < spurCount; i++) addDeadEndSpur(blob, walk, cols, rows);
 
-  if (!corners.every((corner) => isReachable(blob, corner, destination, cols, rows))) return null;
-  return { destination, blob, corners };
+  if (!isReachable(blob, corner, destination, cols, rows)) return null;
+  return { destination, blob, corner };
 }
 
 // ~100-200 predefined board layouts per the Week 8 CSV ("Redesign Emoji
@@ -340,13 +388,13 @@ function generateRound(emojiRepository, { cols, rows, minMatches, difficultyTier
       blob = picked.blob;
     } else {
       // Pool somehow came up empty (a pathologically small/odd grid size) --
-      // fall back to a deterministic construction that's connected for
-      // every corner by definition, rather than ship a board that was never
-      // actually validated.
-      for (const corner of spawnCorners(cols, rows)) {
-        const path = pathBetween(corner, destination, true);
-        for (const cell of path) blob.set(key(cell.col, cell.row), cell);
-      }
+      // fall back to a deterministic construction that's connected by
+      // definition, rather than ship a board that was never actually
+      // validated. Only corner 0 (see buildPattern's comment: the only
+      // spawn corner a real single-player room ever actually uses).
+      const corner = spawnCorners(cols, rows)[0];
+      const path = pathBetween(corner, destination, true);
+      for (const cell of path) blob.set(key(cell.col, cell.row), cell);
     }
   }
 
