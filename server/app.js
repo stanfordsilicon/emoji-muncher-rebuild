@@ -38,6 +38,16 @@ app.get("/api/leaderboard", async (req, res) => {
   res.json({ leaderboard: await scoreRepository.getLeaderboard(20) });
 });
 
+// Deliberately touches zero database code -- exists to (a) isolate whether a
+// slow response is Vercel's own cold start (function container boot, module
+// require()s) versus the Mongo connection specifically, by comparing its
+// timing against a DB-backed route on the same cold instance, and (b) give
+// a scheduled keep-warm ping (see vercel.json's crons) a cheap target that
+// doesn't cost a database round trip just to keep an instance alive.
+app.get("/api/health", (req, res) => {
+  res.json({ ok: true, t: Date.now() });
+});
+
 function normId(value) {
   return String(value || "").trim();
 }
