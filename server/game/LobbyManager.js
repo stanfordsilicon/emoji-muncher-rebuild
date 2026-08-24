@@ -18,33 +18,31 @@ const { createRoomStore } = require("./store");
 // concurrency race before giving up. Also doubles as the retry budget for a
 // `store.getRoom` miss (see below) -- both share the same loop.
 //
-// Measured directly against production (a script that hit /api/create-room
-// then hammered /api/move immediately after): a brand-new Mongo connection
-// on a cold Vercel instance can take upwards of *ten seconds* before it
-// reliably sees a document that was written (and instantly re-readable via
-// a *warm* connection) moments earlier -- not the "roughly up to a second"
-// this budget used to assume, and not even reliably covered by an earlier
-// pass at this fix that budgeted ~9s (still measured failing past that on
-// a later cold instance). Every request issued during that window used to
-// exhaust its retries and report "Room not found", silently dropping the
-// player's first several keypresses with zero feedback -- indistinguishable,
-// from their side, from the game being frozen. Once a given serverless
-// instance's connection is warm, every subsequent request against *that*
-// instance is fast (sub-100ms) -- but Vercel doesn't guarantee the next
-// request lands on the same instance, so more than one of a single
-// player's early moves can each independently pay this cost against a
-// different cold instance. vercel.json's maxDuration is raised well above
-// this budget's worst case to give it room to actually run.
-const MAX_MUTATE_RETRIES = 32;
+// This used to be pushed much higher (32 attempts, ~18-20s budget) chasing
+// single-request cold-start measurements. Then a concurrency test -- 8
+// players hitting /api/create-room + /api/move at the same moment --
+// showed that was making things *worse*, not better: 6 of the 8 concurrent
+// requests each independently retried against Mongo for the *entire* ~20s
+// budget and still failed. A long budget doesn't help a request that's
+// never going to succeed anyway (whatever's actually contending under
+// concurrent cold connections was still contending 20s later); it just
+// means every one of those doomed requests spends 20s hammering Mongo with
+// retries before giving up, piling more concurrent connection attempts on
+// top of whatever's already causing the slowdown. Pulled back down to fail
+// faster instead -- a request that was going to fail anyway now does so in
+// ~5s instead of ~20s, which means less self-inflicted load stacking up
+// during exactly the burst that's already struggling.
+const MAX_MUTATE_RETRIES = 15;
 
 // Delay before each retry (attempt 0 fires immediately, no wait). A short,
 // increasing backoff (capped, with a little jitter so several requests
-// retrying in lockstep don't keep landing on each other) spreads the 32
-// attempts across roughly up to eighteen seconds -- comfortable margin over
-// the worst cold start measured above -- while adding no delay at all to
-// the common case where the very first attempt already succeeds.
+// retrying in lockstep don't keep landing on each other) spreads the 15
+// attempts across roughly up to five seconds -- enough for the common
+// single-request cold start to resolve -- without piling on for many more
+// seconds once a request is in real trouble (see the concurrency note
+// above).
 const RETRY_BASE_DELAY_MS = 40;
-const RETRY_MAX_DELAY_MS = 700;
+const RETRY_MAX_DELAY_MS = 500;
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
