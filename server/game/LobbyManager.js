@@ -176,9 +176,9 @@ async function mutateRoom(rawCode, mutateFn) {
 // same player id (e.g. after a page refresh mid-round): that old game was
 // already abandoned the moment the tab reloaded, so there's nothing to
 // preserve by keeping it around instead of just starting clean.
-async function createGame(playerId, username) {
+async function createGame(playerId, username, language) {
   const code = codeFor(playerId);
-  const room = GameRoom.createRoom(code);
+  const room = GameRoom.createRoom(code, language);
   GameRoom.addPlayer(room, playerId, username);
   GameRoom.beginGame(room);
   await store.saveRoom(room); // brand-new room -- nothing to conflict with yet

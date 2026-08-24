@@ -113,7 +113,11 @@
   document.getElementById("playSoloBtn").addEventListener("click", async () => {
     const username = getUsername();
     if (!username) return;
-    const res = await api("create-room", { username });
+    // arcadeLang is set moments after page load by initArcadeLink() below,
+    // well before a real click can happen -- null/undefined here just means
+    // "no arcade party" or "no concept data for that language yet", and the
+    // server falls back to English either way.
+    const res = await api("create-room", { username, language: arcadeLang });
     if (!res.ok) return showError(lobbyError, res.error);
     enterRoom(res.room);
   });

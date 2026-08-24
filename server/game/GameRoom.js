@@ -1,7 +1,7 @@
 "use strict";
 
 const config = require("../config");
-const { emojiRepository } = require("../data");
+const { getEmojiRepository } = require("../data");
 const { generateRound } = require("./gridGenerator");
 
 /**
@@ -59,9 +59,13 @@ function clamp(v, lo, hi) {
   return Math.max(lo, Math.min(hi, v));
 }
 
-function createRoom(code) {
+function createRoom(code, language) {
   return {
     code,
+    // Which per-language concept data (see server/data/index.js's
+    // getEmojiRepository) this room's rounds draw keywords from -- the
+    // arcade party's Game Language, or "en" standalone/unsupported.
+    language: language || "en",
     status: "lobby", // lobby | playing | roundEnd | gameOver
     players: {}, // playerId -> player state (always exactly one entry)
     playerOrder: [],
@@ -245,7 +249,7 @@ function resolveMunch(room, player) {
   const alreadyEaten = Object.prototype.hasOwnProperty.call(room.eatenCells, key);
 
   if (!alreadyEaten) {
-    const correct = emojiRepository.isMatch(cell.symbol, room.keyword);
+    const correct = getEmojiRepository(room.language).isMatch(cell.symbol, room.keyword);
     room.eatenCells[key] = { by: player.id, symbol: cell.symbol, correct };
     player.eaten.push(key);
     player.eatOrder += 1;
@@ -319,7 +323,7 @@ function advanceAfterDelay(room) {
   room.nextRoundAt = Date.now() + config.NEXT_ROUND_PAUSE_MS;
 }
 
-function emojiMetaForGrid(grid, keyword) {
+function emojiMetaForGrid(grid, keyword, repo) {
   const seen = new Map();
   for (const cell of grid) {
     if (!seen.has(cell.symbol)) {
@@ -329,7 +333,7 @@ function emojiMetaForGrid(grid, keyword) {
         // unsupervised clustering, not a hand-curated list, so every match
         // is genuinely inferred rather than manually confirmed.
         confirmedOrInferred: "inferred",
-        poisonStatus: emojiRepository.isMatch(cell.symbol, keyword) ? "safe" : "poison",
+        poisonStatus: repo.isMatch(cell.symbol, keyword) ? "safe" : "poison",
       });
     }
   }
@@ -360,14 +364,15 @@ function nextRound(room) {
     return;
   }
 
-  const { keyword, grid, correctCount, difficulty, destination } = generateRound(emojiRepository, {
+  const repo = getEmojiRepository(room.language);
+  const { keyword, grid, correctCount, difficulty, destination } = generateRound(repo, {
     cols: config.GRID_COLS,
     rows: config.GRID_ROWS,
     minMatches: config.MIN_MATCHES_PER_KEYWORD,
     difficultyTier: tierForRound(room.round, config.ROUND_COUNT),
   });
   room.keyword = keyword;
-  room.keywordLabel = emojiRepository.getKeywordLabel(keyword);
+  room.keywordLabel = repo.getKeywordLabel(keyword);
   room.grid = grid;
   room.correctCount = correctCount;
   room.destination = destination ? { col: destination.col, row: destination.row } : null;
@@ -375,7 +380,7 @@ function nextRound(room) {
   room.roundEndsAt = room.roundStartedAt + config.ROUND_TIME_MS;
   room.status = "playing";
 
-  const emojiMeta = emojiMetaForGrid(grid, keyword);
+  const emojiMeta = emojiMetaForGrid(grid, keyword, repo);
 
   let i = 0;
   for (const id of room.playerOrder) {
@@ -441,7 +446,8 @@ function finalizeCurrentRoundLogs(room) {
 
   const roundStart = room.roundStartedAt;
   const cols = config.GRID_COLS;
-  const correctCells = room.grid.filter((c) => emojiRepository.isMatch(c.symbol, room.keyword));
+  const repo = getEmojiRepository(room.language);
+  const correctCells = room.grid.filter((c) => repo.isMatch(c.symbol, room.keyword));
 
   for (const id of room.playerOrder) {
     const player = room.players[id];
@@ -454,7 +460,7 @@ function finalizeCurrentRoundLogs(room) {
     for (const key of player.eaten) {
       const [col, row] = key.split(",").map(Number);
       const cell = room.grid[row * cols + col];
-      if (cell && emojiRepository.isMatch(cell.symbol, room.keyword)) correctEaten += 1;
+      if (cell && repo.isMatch(cell.symbol, room.keyword)) correctEaten += 1;
       else wrongEaten += 1;
     }
 

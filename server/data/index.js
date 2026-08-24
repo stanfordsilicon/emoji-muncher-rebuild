@@ -1,6 +1,8 @@
 "use strict";
 
-const { createConceptRepository } = require("./ConceptRepository");
+const fs = require("fs");
+const path = require("path");
+const { createConceptRepository, ConceptRepository } = require("./ConceptRepository");
 const { createScoreRepository } = require("./ScoreRepository");
 const { createAnalyticsRepository } = require("./AnalyticsRepository");
 const { createSessionStore } = require("./SessionStore");
@@ -43,4 +45,35 @@ const scoreRepository = createScoreRepository({ backend: DATA_BACKEND });
 const analyticsRepository = createAnalyticsRepository({ backend: DATA_BACKEND });
 const sessionStore = createSessionStore({ backend: DATA_BACKEND });
 
-module.exports = { emojiRepository, scoreRepository, analyticsRepository, sessionStore, DATA_BACKEND };
+// Per-language concept data (see server/data/lang/*.json), generated from
+// QMoji's shared CLDR emoji-keyword source -- same k20/k60/k150 shape as
+// conceptClusters.json, just built from real per-language keyword text
+// instead of unsupervised English clustering. Not every Game Language has
+// enough CLDR keyword coverage to produce three playable tiers, so only
+// languages that cleared that bar at generation time have a file here;
+// getEmojiRepository() falls back to the English default for everything
+// else, same as if no language had been requested at all. Loaded lazily
+// and cached (never at process startup) so adding/removing a language file
+// doesn't cost every room a read it'll never use.
+const LANG_DATA_DIR = path.join(__dirname, "lang");
+const langRepoCache = new Map();
+
+function getEmojiRepository(lang) {
+  if (!lang || lang === "en") return emojiRepository;
+  if (langRepoCache.has(lang)) return langRepoCache.get(lang);
+
+  let repo = emojiRepository;
+  const file = path.join(LANG_DATA_DIR, `${lang}.json`);
+  if (fs.existsSync(file)) {
+    try {
+      repo = new ConceptRepository(file);
+    } catch (e) {
+      console.error(`Failed to load concept data for language "${lang}":`, e.message);
+      repo = emojiRepository;
+    }
+  }
+  langRepoCache.set(lang, repo);
+  return repo;
+}
+
+module.exports = { emojiRepository, getEmojiRepository, scoreRepository, analyticsRepository, sessionStore, DATA_BACKEND };
