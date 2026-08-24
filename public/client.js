@@ -110,16 +110,34 @@
     startHeartbeat();
   }
 
-  document.getElementById("playSoloBtn").addEventListener("click", async () => {
+  const playSoloBtn = document.getElementById("playSoloBtn");
+  const playSoloBtnLabel = playSoloBtn.textContent;
+  playSoloBtn.addEventListener("click", async () => {
     const username = getUsername();
     if (!username) return;
-    // arcadeLang is set moments after page load by initArcadeLink() below,
-    // well before a real click can happen -- null/undefined here just means
-    // "no arcade party" or "no concept data for that language yet", and the
-    // server falls back to English either way.
-    const res = await api("create-room", { username, language: arcadeLang });
-    if (!res.ok) return showError(lobbyError, res.error);
-    enterRoom(res.room);
+    // create-room has no client-side timeout or retry of its own -- it's a
+    // single request that simply takes as long as it takes (a cold
+    // serverless/database connection can add several real seconds; see
+    // server/game/LobbyManager.js's mutateRoom comment). Previously the
+    // button just sat there doing nothing for however long that took, with
+    // no visual acknowledgment of the click at all -- read as "the play
+    // button doesn't work" rather than "the button worked, the server is
+    // just slow to answer." Disabling it and swapping its label is enough
+    // to turn that silence into visible, honest feedback.
+    playSoloBtn.disabled = true;
+    playSoloBtn.textContent = t("loading");
+    try {
+      // arcadeLang is set moments after page load by initArcadeLink() below,
+      // well before a real click can happen -- null/undefined here just
+      // means "no arcade party" or "no concept data for that language yet",
+      // and the server falls back to English either way.
+      const res = await api("create-room", { username, language: arcadeLang });
+      if (!res.ok) return showError(lobbyError, res.error);
+      enterRoom(res.room);
+    } finally {
+      playSoloBtn.disabled = false;
+      playSoloBtn.textContent = playSoloBtnLabel;
+    }
   });
 
   // ---- QMoji Arcade: return-to-launchpad continuity ----

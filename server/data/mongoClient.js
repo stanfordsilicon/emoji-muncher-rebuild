@@ -37,7 +37,22 @@ function getMongoDb() {
     const uri = process.env.MONGODB_URI;
     if (!uri) throw new Error("MONGODB_URI is not set");
     const dbName = process.env.MONGODB_DB_NAME || "emojimunchers_data";
-    const client = new MongoClient(uri, { readPreference: "primary" });
+    // Pool sizing tuned for serverless, not for a long-lived server: each
+    // cold instance only ever handles a handful of concurrent requests at
+    // most (Vercel isn't fanning thousands of parallel requests into one
+    // instance here), so a large pool just means more sockets this instance
+    // opens and negotiates before it can serve anything, all of it wasted
+    // the moment this instance eventually gets torn down. maxIdleTimeMS
+    // closes sockets this instance stops using instead of holding them
+    // open for a process that may never see another request.
+    const client = new MongoClient(uri, {
+      readPreference: "primary",
+      maxPoolSize: 5,
+      minPoolSize: 0,
+      maxIdleTimeMS: 30000,
+      connectTimeoutMS: 10000,
+      socketTimeoutMS: 20000,
+    });
     clientPromise = client.connect().then((c) => c.db(dbName));
     clientPromise.catch(() => {
       // A failed connection attempt must not poison every future call for
