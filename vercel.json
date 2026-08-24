@@ -8,6 +8,6 @@
     }
   },
   "crons": [
-    { "path": "/api/health", "schedule": "*/5 * * * *" }
+    { "path": "/api/warmup", "schedule": "*/2 * * * *" }
   ]
 }

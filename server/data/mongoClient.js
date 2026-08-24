@@ -42,14 +42,21 @@ function getMongoDb() {
     // most (Vercel isn't fanning thousands of parallel requests into one
     // instance here), so a large pool just means more sockets this instance
     // opens and negotiates before it can serve anything, all of it wasted
-    // the moment this instance eventually gets torn down. maxIdleTimeMS
-    // closes sockets this instance stops using instead of holding them
-    // open for a process that may never see another request.
+    // the moment this instance eventually gets torn down.
+    //
+    // maxIdleTimeMS used to be 30000 (30s) -- but that actively fought the
+    // keep-warm cron in vercel.json (every 5 min): the whole point of that
+    // cron is to stop a real player's *first* request of a session from
+    // paying a cold connection's setup cost, and a 30s idle-socket close
+    // meant the connection was already dead again long before the next
+    // ping, or before a player's next unhurried move -- so requests kept
+    // paying full cold-connect cost regardless of the cron running at all.
+    // Set well past both gaps so a warm socket actually survives them.
     const client = new MongoClient(uri, {
       readPreference: "primary",
       maxPoolSize: 5,
-      minPoolSize: 0,
-      maxIdleTimeMS: 30000,
+      minPoolSize: 1,
+      maxIdleTimeMS: 600000,
       connectTimeoutMS: 10000,
       socketTimeoutMS: 20000,
     });

@@ -188,7 +188,7 @@ input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 10px v
    first round's JS has run. */
 #game { width: 100%; max-width: 480px; box-sizing: border-box; }
 
-#topBar { display: flex; align-items: center; justify-content: space-between; padding: 2px 2px 8px; }
+#topBar { display: flex; align-items: center; justify-content: flex-end; padding: 2px 2px 8px; }
 #roundInfo { font-family: var(--pixel-font); font-size: 10px; font-weight: normal; color: var(--ink-soft); letter-spacing: 0.04em; }
 .icon-btn {
   border: 2px solid var(--panel-line); background: var(--panel); color: var(--ink); width: 46px; height: 46px;

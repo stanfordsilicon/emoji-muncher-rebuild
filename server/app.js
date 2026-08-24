@@ -23,6 +23,7 @@ const express = require("express");
 const bcrypt = require("bcryptjs");
 
 const { scoreRepository, analyticsRepository, sessionStore } = require("./data");
+const { getMongoDb } = require("./data/mongoClient");
 const GameRoom = require("./game/GameRoom");
 const lobbyManager = require("./game/LobbyManager");
 const { arcadeProxy } = require("./arcade-proxy");
@@ -38,14 +39,32 @@ app.get("/api/leaderboard", async (req, res) => {
   res.json({ leaderboard: await scoreRepository.getLeaderboard(20) });
 });
 
-// Deliberately touches zero database code -- exists to (a) isolate whether a
+// Deliberately touches zero database code -- exists to isolate whether a
 // slow response is Vercel's own cold start (function container boot, module
 // require()s) versus the Mongo connection specifically, by comparing its
-// timing against a DB-backed route on the same cold instance, and (b) give
-// a scheduled keep-warm ping (see vercel.json's crons) a cheap target that
-// doesn't cost a database round trip just to keep an instance alive.
+// timing against a DB-backed route on the same cold instance. Confirmed via
+// this route that Vercel's own cold start is well under 1s even under
+// concurrent load -- the multi-second-to-20+s delays are specifically the
+// Mongo connection, not this.
 app.get("/api/health", (req, res) => {
   res.json({ ok: true, t: Date.now() });
+});
+
+// The actual target for vercel.json's keep-warm cron -- /api/health above
+// deliberately doesn't touch Mongo (that's what made it useful as an
+// isolation test), which meant the cron was keeping this function's
+// container warm but never touching the *Mongo connection* it exists to
+// keep warm at all. This is the one that matters: a trivial `ping` command
+// forces getMongoDb() to actually run and keeps that connection's socket
+// alive under mongoClient.js's maxIdleTimeMS.
+app.get("/api/warmup", async (req, res) => {
+  try {
+    const db = await getMongoDb();
+    await db.command({ ping: 1 });
+    res.json({ ok: true, t: Date.now() });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
 });
 
 function normId(value) {

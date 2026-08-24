@@ -271,7 +271,6 @@
     myPrev = null;
     showScreen("lobby");
   }
-  document.getElementById("homeBtnGame").addEventListener("click", goHome);
   document.getElementById("homeBtnOver").addEventListener("click", goHome);
 
   // There used to be a `pagehide` listener here that sent an immediate
