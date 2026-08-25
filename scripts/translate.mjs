@@ -4,7 +4,6 @@
 //   DEEPL_API_KEY=... node scripts/translate.mjs            # all languages
 //   DEEPL_API_KEY=... node scripts/translate.mjs fr pt-br   # just these
 //   DEEPL_API_KEY=... node scripts/translate.mjs --force      # ignore cache
-//   DEEPL_API_KEY=... node scripts/translate.mjs --bundle=factoids
 //
 // This file is identical in survey-scramble-rebuild and emoji-muncher-rebuild.
 // Keep it that way -- if one needs a change, both get it.
@@ -42,27 +41,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const LOCALES = join(HERE, "..", "public", "locales");
-
-// A "bundle" is one independently-translated set of strings. The default
-// bundle is the UI chrome (en.json -> fr.json, ...). --bundle=factoids
-// translates the Did You Know content instead (factoids.en.json ->
-// factoids.fr.json, ...), with its own overrides and its own snapshot.
-//
-// They are separate on purpose: 100 prose entries in the same file as 57
-// chrome keys makes both the diffs and the overrides file unreadable, the
-// two have different review cadences, and a missing factoid is cosmetic
-// where a missing button label is broken UI. Same pipeline either way --
-// same glossary, same overrides mechanism, same validation.
-function bundlePaths(bundle) {
-  const p = bundle ? bundle + "." : "";
-  return {
-    source: join(LOCALES, `${p}en.json`),
-    out: (lang) => join(LOCALES, `${p}${lang}.json`),
-    overrides: (lang) => join(LOCALES, `${p}${lang}.overrides.json`),
-    numericExempt: join(LOCALES, `${p}numeric-exempt.json`),
-    snapshot: (lang) => join(LOCALES, `.${p}${lang}.en-snapshot.json`),
-  };
-}
+const SOURCE = join(LOCALES, "en.json");
 
 // Canonical lowercase codes (our filenames) -> DeepL's target codes.
 // DeepL requires the regional variant for Portuguese: PT-BR / PT-PT.
@@ -96,6 +75,7 @@ const DO_NOT_TRANSLATE = new Set([
   "game_title_odd",
   "game_title_one",
   "game_title_out",
+  "game_title_moji",
 ]);
 
 // ---------------------------------------------------------------------
@@ -530,46 +510,39 @@ async function main() {
     process.exit(1);
   }
 
+  const source = readJson(SOURCE);
+  if (!source) throw new Error(`missing source file: ${SOURCE}`);
+  // Optional per repo. Absent means no exemptions.
+  const numericExempt = readJson(join(LOCALES, "numeric-exempt.json"), {}) || {};
+
   const argv = process.argv.slice(2);
   // --force re-translates everything even when the English is unchanged.
   // Needed when something OTHER than the source text changes the output:
   // a new glossary, a change to how placeholders are protected, a fix to
   // the quote-artifact repair.
   const force = argv.includes("--force");
-  const bundleArg = argv.find((a) => a.startsWith("--bundle="));
-  const bundle = bundleArg ? bundleArg.slice("--bundle=".length) : "";
-  const P = bundlePaths(bundle);
   const requested = argv.filter((a) => !a.startsWith("--")).map((a) => a.toLowerCase());
-
-  const source = readJson(P.source);
-  if (!source) throw new Error(`missing source file: ${P.source}`);
-  // Optional, per bundle. Absent means no exemptions.
-  const numericExempt = readJson(P.numericExempt, {}) || {};
-
-
   const langs = requested.length ? requested : Object.keys(TARGETS);
   for (const l of langs) {
     if (!TARGETS[l]) throw new Error(`unknown language "${l}" -- known: ${Object.keys(TARGETS).join(", ")}`);
   }
 
   mkdirSync(LOCALES, { recursive: true });
-  console.log(
-    `source: ${Object.keys(source).length} keys${bundle ? ` [${bundle}]` : ""}  ->  ${langs.join(", ")}`,
-  );
+  console.log(`source: ${Object.keys(source).length} keys  ->  ${langs.join(", ")}`);
 
   const glossarySupport = await supportedGlossaryTargets(key);
   const glossaryCache = readJson(GLOSSARY_CACHE, {}) || {};
 
   let failed = 0;
   for (const lang of langs) {
-    const outPath = P.out(lang);
-    const overridesPath = P.overrides(lang);
+    const outPath = join(LOCALES, `${lang}.json`);
+    const overridesPath = join(LOCALES, `${lang}.overrides.json`);
     // READ ONLY. This script must never write this file.
     const overrides = readJson(overridesPath, {}) || {};
     const previous = readJson(outPath, {}) || {};
     const glossary = await acquireGlossary(key, lang, glossarySupport);
     if (glossary) glossaryCache[lang] = { id: glossary.id, hash: glossary.hash };
-    const snapshotPath = P.snapshot(lang);
+    const snapshotPath = join(LOCALES, `.${lang}.en-snapshot.json`);
     const previousSnapshot = readJson(snapshotPath, {}) || {};
     const previousEn = previousSnapshot.strings || {};
     // A glossary change alters the output without altering the English, so
