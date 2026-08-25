@@ -127,11 +127,12 @@
     playSoloBtn.disabled = true;
     playSoloBtn.textContent = t("loading");
     try {
-      // arcadeLang is set moments after page load by initArcadeLink() below,
-      // well before a real click can happen -- null/undefined here just
-      // means "no arcade party" or "no concept data for that language yet",
-      // and the server falls back to English either way.
-      const res = await api("create-room", { username, language: arcadeLang });
+      // arcadeLang/arcadeUiLang are set moments after page load by
+      // initArcadeLink() below, well before a real click can happen --
+      // null/undefined here just means "no arcade party" or "no concept
+      // data for that language yet", and the server falls back to English
+      // either way.
+      const res = await api("create-room", { username, language: arcadeLang, uiLang: arcadeUiLang });
       if (!res.ok) return showError(lobbyError, res.error);
       enterRoom(res.room);
     } finally {
@@ -150,6 +151,7 @@
   const backToLaunchpadBtn = document.getElementById("backToLaunchpadBtn");
   let arcadeRoomCode = null;
   let arcadeLang = null;
+  let arcadeUiLang = null;
   let arcadePlayerId = null;
 
   // Mirrors qmoji/app.js's own launchGame() transition (fade in "LOADING…"
@@ -171,7 +173,7 @@
   }
 
   backToLaunchpadBtn.addEventListener("click", () => {
-    navigateWithLoadingScreen(QMojiArcade.backToHomescreenUrl(arcadeRoomCode, arcadeLang, arcadePlayerId));
+    navigateWithLoadingScreen(QMojiArcade.backToHomescreenUrl(arcadeRoomCode, arcadeLang, arcadePlayerId, arcadeUiLang));
   });
 
   (async function initArcadeLink() {
@@ -179,6 +181,7 @@
     if (!arcade) return;
     arcadeRoomCode = arcade.roomCode;
     arcadeLang = arcade.lang;
+    arcadeUiLang = arcade.uiLang;
     arcadePlayerId = arcade.playerId;
 
     const me = (arcade.room.players || []).find((p) => p.playerId === arcadePlayerId);

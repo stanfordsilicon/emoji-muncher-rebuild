@@ -59,13 +59,18 @@ function clamp(v, lo, hi) {
   return Math.max(lo, Math.min(hi, v));
 }
 
-function createRoom(code, language) {
+function createRoom(code, language, uiLang) {
   return {
     code,
     // Which per-language concept data (see server/data/index.js's
     // getEmojiRepository) this room's rounds draw keywords from -- the
     // arcade party's Game Language, or "en" standalone/unsupported.
     language: language || "en",
+    // The arcade party's Screen Language (this game has no UI translation
+    // of its own -- purely a data-capture pass-through, recorded alongside
+    // Game Language in analytics so which languages people are actually
+    // combining is visible downstream).
+    uiLang: uiLang || "en",
     status: "lobby", // lobby | playing | roundEnd | gameOver
     players: {}, // playerId -> player state (always exactly one entry)
     playerOrder: [],

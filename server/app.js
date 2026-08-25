@@ -159,7 +159,8 @@ async function saveGameSessionAnalytics(room) {
         username: player.username,
         roomCode: room.code,
         game: "Emoji Munchers",
-        language: "en", // only language currently playable; revisit once localized
+        language: room.language || "en", // Game Language -- which concept data this session's rounds drew from
+        screenLanguage: room.uiLang || "en", // Screen Language -- the arcade party's interface language
         gameStartedAt: room.gameStartedAt ? new Date(room.gameStartedAt) : null,
         gameEndedAt,
         totalDurationMs,
@@ -186,7 +187,7 @@ function maybeSaveAnalytics(room) {
 
 app.post("/api/create-room", async (req, res) => {
   try {
-    const { username, playerId, token, language } = req.body || {};
+    const { username, playerId, token, language, uiLang } = req.body || {};
     const id = normId(playerId);
     const name = String(username || "").trim().slice(0, 20);
     if (!id) return res.json({ ok: false, error: "Missing player id." });
@@ -195,7 +196,12 @@ app.post("/api/create-room", async (req, res) => {
     if (await isNameOwnedByAnother(authedUsername, name)) {
       return res.json({ ok: false, error: "That name is taken — sign in or pick another." });
     }
-    const room = await lobbyManager.createGame(id, name, typeof language === "string" ? language : undefined);
+    const room = await lobbyManager.createGame(
+      id,
+      name,
+      typeof language === "string" ? language : undefined,
+      typeof uiLang === "string" ? uiLang : undefined
+    );
     scoreRepository.upsertPlayer(name);
     maybeSaveAnalytics(room);
     res.json({ ok: true, room: GameRoom.toClientView(room) });
