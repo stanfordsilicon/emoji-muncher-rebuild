@@ -28,6 +28,7 @@
   "next_round_in": "Следующий раунд через {seconds}…",
   "next_round_now": "Следующий раунд…",
   "persistent_hint": "Стрелки — для перемещения. Мчись к 🚩!",
+  "connecting_note": "Устанавливаю соединение…",
   "game_over_title": "Игра окончена",
   "final_score": "🏆 Итоговый счёт: {score}",
   "all_time_leaderboard_heading": "Таблица рекордов",

@@ -28,6 +28,7 @@
   "next_round_in": "Prochain tour dans {seconds}…",
   "next_round_now": "Prochain tour…",
   "persistent_hint": "Flèches pour te déplacer. Fonce vers le 🚩 !",
+  "connecting_note": "Connexion en cours…",
   "game_over_title": "Fin de partie",
   "final_score": "🏆 Score final : {score}",
   "all_time_leaderboard_heading": "Classement général",

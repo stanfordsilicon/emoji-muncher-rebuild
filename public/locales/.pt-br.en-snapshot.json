@@ -30,6 +30,7 @@
     "next_round_in": "Next round in {seconds}…",
     "next_round_now": "Next round…",
     "persistent_hint": "Arrow keys to move. Race to the 🚩!",
+    "connecting_note": "Connecting…",
     "game_over_title": "Game Over",
     "final_score": "🏆 Final score: {score}",
     "all_time_leaderboard_heading": "All-time leaderboard",

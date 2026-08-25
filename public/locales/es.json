@@ -28,6 +28,7 @@
   "next_round_in": "Próxima ronda en {seconds}…",
   "next_round_now": "Próxima ronda…",
   "persistent_hint": "Usa las flechas para moverte. ¡Corre hacia la 🚩!",
+  "connecting_note": "Conectando…",
   "game_over_title": "Fin del juego",
   "final_score": "🏆 Puntuación final: {score}",
   "all_time_leaderboard_heading": "Clasificación histórica",
