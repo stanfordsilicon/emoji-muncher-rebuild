@@ -1,0 +1,31 @@
+{
+  "_readme": [
+    "HUMAN OVERRIDES for es. This file is hand-maintained and always wins.",
+    "",
+    "scripts/translate.mjs READS this file and merges it on top of DeepL's",
+    "output. It never writes to, modifies, or deletes this file.",
+    "",
+    "To fix a bad translation, add the key HERE -- do not edit es.json,",
+    "which is regenerated and overwritten on every run.",
+    "",
+    "Every entry below was written by Claude, not a native speaker. See",
+    "TRANSLATION_NOTES.md for what was wrong with each one and its review",
+    "status. Nothing here has been verified by a human.",
+    "",
+    "Keys must match public/locales/en.json. {placeholder} tokens and emoji",
+    "must match the English exactly -- the generator validates overrides on",
+    "the same terms as generated text and refuses to write the locale if they",
+    "don't. (JSON has no comment syntax, hence this _readme key; the merge",
+    "only considers keys that exist in en.json, so it is inert.)"
+  ],
+  "signed_in_as": "Sesión iniciada como {name}",
+  "stat_games_played": "Partidas jugadas",
+  "stat_last_played": "Última partida",
+  "play_again_button": "Volver a jugar",
+  "all_time_score_summary": "mejor puntuación 🏆 {score} · {games} partidas",
+  "back_to_launchpad": "VOLVER A LA BASE",
+  "username_placeholder": "ej. sid",
+  "round_one_banner": "Come los emojis que coincidan con la palabra clave — los demás te cuestan una vida. ¡Corre hacia la 🚩!",
+  "persistent_hint": "Usa las flechas para moverte. ¡Corre hacia la 🚩!",
+  "game_over_title": "Fin del juego"
+}

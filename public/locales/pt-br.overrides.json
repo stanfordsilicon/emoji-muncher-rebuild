@@ -1,0 +1,30 @@
+{
+  "_readme": [
+    "HUMAN OVERRIDES for pt-br. This file is hand-maintained and always wins.",
+    "",
+    "scripts/translate.mjs READS this file and merges it on top of DeepL's",
+    "output. It never writes to, modifies, or deletes this file.",
+    "",
+    "To fix a bad translation, add the key HERE -- do not edit pt-br.json,",
+    "which is regenerated and overwritten on every run.",
+    "",
+    "Every entry below was written by Claude, not a native speaker. See",
+    "TRANSLATION_NOTES.md for what was wrong with each one and its review",
+    "status. Nothing here has been verified by a human.",
+    "",
+    "Keys must match public/locales/en.json. {placeholder} tokens and emoji",
+    "must match the English exactly -- the generator validates overrides on",
+    "the same terms as generated text and refuses to write the locale if they",
+    "don't. (JSON has no comment syntax, hence this _readme key; the merge",
+    "only considers keys that exist in en.json, so it is inert.)"
+  ],
+  "signed_in_as": "Conectado como {name}",
+  "next_round_in": "Próxima rodada em {seconds}…",
+  "all_time_score_summary": "melhor pontuação 🏆 {score} · {games} partidas",
+  "back_to_launchpad": "VOLTAR À BASE",
+  "username_placeholder": "ex. sid",
+  "stat_games_played": "Partidas jogadas",
+  "stat_last_played": "Última partida",
+  "round_one_banner": "Coma os emojis que combinam com a palavra-chave — os demais custam uma vida. Corra até a 🚩!",
+  "persistent_hint": "Use as setas para se mover. Corra até a 🚩!"
+}
