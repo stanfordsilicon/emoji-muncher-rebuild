@@ -3,6 +3,7 @@
 const fs = require("fs");
 const path = require("path");
 const { createConceptRepository, ConceptRepository } = require("./ConceptRepository");
+const phaseFilter = require("./phaseFilter");
 const { createScoreRepository } = require("./ScoreRepository");
 const { createAnalyticsRepository } = require("./AnalyticsRepository");
 const { createSessionStore } = require("./SessionStore");
@@ -58,21 +59,56 @@ const sessionStore = createSessionStore({ backend: DATA_BACKEND });
 const LANG_DATA_DIR = path.join(__dirname, "lang");
 const langRepoCache = new Map();
 
+// Filters a k20/k60/k150 concept-cluster object down to only the emoji
+// qmoji-2's Phase system currently allows for this language -- an
+// additional admin-curation layer on top of the per-language keyword data
+// (see server/data/lang/*.json), not a replacement for it. Returns null
+// (never a partially-broken result) if filtering would leave any tier with
+// zero concepts, so the caller can fall back to the unfiltered data instead
+// of shipping a round-generator with nothing to pick from.
+function filterConceptData(raw, allowedSet) {
+  const filtered = {};
+  for (const tierKey of Object.keys(raw)) {
+    const concepts = raw[tierKey]
+      .map((c) => ({ ...c, emoji: c.emoji.filter((e) => allowedSet.has(e)) }))
+      .filter((c) => c.emoji.length > 0);
+    if (concepts.length === 0) return null;
+    filtered[tierKey] = concepts;
+  }
+  return filtered;
+}
+
 function getEmojiRepository(lang) {
   if (!lang || lang === "en") return emojiRepository;
-  if (langRepoCache.has(lang)) return langRepoCache.get(lang);
+
+  // Never blocks: reads whatever the last background fetch already found
+  // (null/no restriction until one lands) and kicks off a fresh one if this
+  // language's result is missing or stale. See phaseFilter.js.
+  phaseFilter.refreshInBackground(lang);
+  const allowedSet = phaseFilter.getAllowedSet(lang);
+  const cacheKey = allowedSet ? `${lang}|v${phaseFilter.getVersion(lang)}` : `${lang}|unfiltered`;
+  if (langRepoCache.has(cacheKey)) return langRepoCache.get(cacheKey);
 
   let repo = emojiRepository;
   const file = path.join(LANG_DATA_DIR, `${lang}.json`);
   if (fs.existsSync(file)) {
     try {
-      repo = new ConceptRepository(file);
+      let data = JSON.parse(fs.readFileSync(file, "utf8"));
+      if (allowedSet) {
+        const filteredData = filterConceptData(data, allowedSet);
+        if (filteredData) data = filteredData;
+        // else: the Phase set doesn't leave a playable set for this
+        // language's data -- keep the unfiltered data rather than break
+        // the round generator, same "restriction couldn't apply, fall back"
+        // rule used everywhere else this Phase system reads.
+      }
+      repo = new ConceptRepository(data);
     } catch (e) {
       console.error(`Failed to load concept data for language "${lang}":`, e.message);
       repo = emojiRepository;
     }
   }
-  langRepoCache.set(lang, repo);
+  langRepoCache.set(cacheKey, repo);
   return repo;
 }
 

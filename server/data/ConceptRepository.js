@@ -27,8 +27,14 @@ const path = require("path");
  * label like "Colorful Hearts"), so the label alone isn't a safe lookup key.
  */
 class ConceptRepository {
-  constructor(jsonPath) {
-    const raw = JSON.parse(fs.readFileSync(jsonPath, "utf8"));
+  // Accepts either a path to a k20/k60/k150 JSON file (read from disk, the
+  // original usage) or an already-parsed object of that same shape (used by
+  // server/data/index.js to build a Phase-filtered variant in memory
+  // without writing a temp file to disk first).
+  constructor(jsonPathOrData) {
+    const raw = typeof jsonPathOrData === "string"
+      ? JSON.parse(fs.readFileSync(jsonPathOrData, "utf8"))
+      : jsonPathOrData;
     this._tiers = {}; // tier number -> concept[]
     this._byKeyword = new Map(); // "k{tier}:{id}" -> concept
 
