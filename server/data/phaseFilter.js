@@ -9,7 +9,14 @@
 // file existed, until a background fetch (see refreshInBackground) fills
 // it in for next time.
 
-const QMOJI_ADMIN_BASE_URL = process.env.QMOJI_ADMIN_BASE_URL || "http://localhost:5500";
+// Defaults to real production qmoji-2 rather than localhost -- this process
+// is a production deployment far more often than it's a local dev instance
+// with QMOJI_ADMIN_BASE_URL unset, so "can't reach it, fall back to
+// unfiltered" (the safe behavior either way) should be the rare case, not
+// the default one every production deploy hits until someone remembers to
+// set the env var. Local dev that wants its own local qmoji-2 still just
+// sets QMOJI_ADMIN_BASE_URL=http://localhost:5500 to override this.
+const QMOJI_ADMIN_BASE_URL = process.env.QMOJI_ADMIN_BASE_URL || "https://qmoji.org";
 const FRESH_TTL_MS = 5 * 60 * 1000; // phase assignments change rarely -- no need to refetch often
 const FETCH_TIMEOUT_MS = 3000;
 

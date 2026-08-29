@@ -78,22 +78,32 @@ function filterConceptData(raw, allowedSet) {
   return filtered;
 }
 
+const DEFAULT_CONCEPT_DATA_PATH = path.join(__dirname, "conceptClusters.json");
+
 function getEmojiRepository(lang) {
-  if (!lang || lang === "en") return emojiRepository;
+  if (!lang) return emojiRepository;
 
   // Never blocks: reads whatever the last background fetch already found
   // (null/no restriction until one lands) and kicks off a fresh one if this
-  // language's result is missing or stale. See phaseFilter.js.
+  // language's result is missing or stale. See phaseFilter.js. Applies to
+  // "en" too -- it used to short-circuit past this whole function (English
+  // always had a bundled dataset, so there was never a *file* to look up),
+  // but that also meant English could never be Phase-restricted, which is
+  // exactly the language an admin is most likely to curate first.
   phaseFilter.refreshInBackground(lang);
   const allowedSet = phaseFilter.getAllowedSet(lang);
   const cacheKey = allowedSet ? `${lang}|v${phaseFilter.getVersion(lang)}` : `${lang}|unfiltered`;
   if (langRepoCache.has(cacheKey)) return langRepoCache.get(cacheKey);
 
+  // English's raw data is the bundled default; every other language reads
+  // its own per-language file (see server/data/lang/*.json), falling back
+  // to the default if that language has no file yet.
+  const sourcePath = lang === "en" ? DEFAULT_CONCEPT_DATA_PATH : path.join(LANG_DATA_DIR, `${lang}.json`);
+
   let repo = emojiRepository;
-  const file = path.join(LANG_DATA_DIR, `${lang}.json`);
-  if (fs.existsSync(file)) {
+  if (fs.existsSync(sourcePath)) {
     try {
-      let data = JSON.parse(fs.readFileSync(file, "utf8"));
+      let data = JSON.parse(fs.readFileSync(sourcePath, "utf8"));
       if (allowedSet) {
         const filteredData = filterConceptData(data, allowedSet);
         if (filteredData) data = filteredData;
