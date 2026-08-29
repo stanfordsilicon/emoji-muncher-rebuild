@@ -27,6 +27,7 @@ const { getMongoDb } = require("./data/mongoClient");
 const GameRoom = require("./game/GameRoom");
 const lobbyManager = require("./game/LobbyManager");
 const { arcadeProxy } = require("./arcade-proxy");
+const phaseFilter = require("./data/phaseFilter");
 
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 const BCRYPT_ROUNDS = 10;
@@ -196,6 +197,12 @@ app.post("/api/create-room", async (req, res) => {
     if (await isNameOwnedByAnother(authedUsername, name)) {
       return res.json({ ok: false, error: "That name is taken — sign in or pick another." });
     }
+    // Bounded wait (see phaseFilter.js's ensureFresh) so a cold serverless
+    // instance's very first round for this language is actually checked
+    // against qmoji-2's Phase restriction, instead of relying on
+    // getEmojiRepository's fire-and-forget background fetch to have
+    // already won a race it has no guarantee of winning.
+    await phaseFilter.ensureFresh(typeof language === "string" && language ? language : "en");
     const room = await lobbyManager.createGame(
       id,
       name,

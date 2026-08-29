@@ -70,6 +70,50 @@ function refreshInBackground(lang) {
     .catch(() => {});
 }
 
+const ENSURE_FRESH_TIMEOUT_MS = 1500;
+
+// Bounded wait, used once at the one moment it's actually worth a few
+// hundred ms of extra latency: create-room, right before a brand-new
+// round gets generated for a language this process has never fetched
+// Phase data for. Everywhere else (every move, every poll, every
+// mid-session round after the first) keeps using the synchronous
+// getAllowedSet/refreshInBackground pair completely unchanged.
+//
+// Why this exists: on a real serverless deployment, a lightly-trafficked
+// function can go cold between requests, and refreshInBackground's
+// fire-and-forget fetch has no guarantee of finishing before the response
+// carrying that round is already on the wire -- verified live against
+// production (Emoji Munchers): the first couple of requests to a cold
+// instance came back fully unfiltered, and only requests after the
+// instance had been warm for a moment actually restricted to the real
+// Phase set. That's "eventually correct," not "correct," for anyone whose
+// very first round happens to land on a cold start -- which on a
+// lightly-used deployment is not a rare case, it's most of them.
+//
+// Shares the same cache/dedup as refreshInBackground (marks the entry
+// immediately, same as there) so calling both back-to-back for the same
+// language never fires two fetches.
+async function ensureFresh(lang, timeoutMs = ENSURE_FRESH_TIMEOUT_MS) {
+  const entry = cache.get(lang);
+  const now = Date.now();
+  if (entry && now - entry.fetchedAt < FRESH_TTL_MS) return;
+  if (entry) entry.fetchedAt = now;
+  else cache.set(lang, { fetchedAt: now, allowedSet: null, version: 0 });
+
+  const fetchPromise = fetchAllowedEmojis(lang)
+    .then((result) => {
+      if (result === undefined) return;
+      cache.set(lang, { fetchedAt: Date.now(), allowedSet: result, version: nextVersion++ });
+    })
+    .catch(() => {});
+
+  // If the timeout wins the race, fetchPromise is still running and its
+  // own .then() above still updates the cache whenever it actually
+  // resolves -- a timeout here only means *this* round doesn't get to wait
+  // any longer for it, not that the fetch is abandoned.
+  await Promise.race([fetchPromise, new Promise((resolve) => setTimeout(resolve, timeoutMs))]);
+}
+
 function getAllowedSet(lang) {
   const entry = cache.get(lang);
   return entry ? entry.allowedSet : null;
@@ -80,4 +124,4 @@ function getVersion(lang) {
   return entry ? entry.version : 0;
 }
 
-module.exports = { refreshInBackground, getAllowedSet, getVersion };
+module.exports = { refreshInBackground, ensureFresh, getAllowedSet, getVersion };
