@@ -552,18 +552,14 @@ initI18n().then(function () {
     if (res.ok) applySnapshotIfFresh(res.room);
   });
 
-  function loadAllTimeLeaderboard() {
-    fetch("/api/leaderboard")
-      .then((res) => res.json())
-      .then((data) => {
-        leaderboardListEl.innerHTML = "";
-        for (const entry of data.leaderboard || []) {
-          const li = document.createElement("li");
-          li.innerHTML = `<span>${escapeHtml(entry.username)}</span><span>${t("all_time_score_summary", { score: entry.bestScore, games: entry.gamesPlayed })}</span>`;
-          leaderboardListEl.appendChild(li);
-        }
-      })
-      .catch(() => { leaderboardListEl.innerHTML = ""; });
+  function renderSessionLeaderboard(players) {
+    leaderboardListEl.innerHTML = "";
+    const ranked = [...(players || [])].sort((a, b) => b.score - a.score);
+    for (const entry of ranked) {
+      const li = document.createElement("li");
+      li.innerHTML = `<span>${escapeHtml(entry.username)}</span><span>${t("session_score_summary", { score: entry.score })}</span>`;
+      leaderboardListEl.appendChild(li);
+    }
   }
 
   function applyGameOver(view) {
@@ -572,7 +568,7 @@ initI18n().then(function () {
     lastPlayers = view.players;
     const me = view.players.find((p) => p.playerId === myId);
     finalScoreEl.textContent = t("final_score", { score: me ? me.score : 0 });
-    loadAllTimeLeaderboard();
+    renderSessionLeaderboard(view.players);
   }
 
   // A move's own POST response and the background poller both resolve

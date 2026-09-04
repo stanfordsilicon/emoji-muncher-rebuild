@@ -31,8 +31,8 @@
   "connecting_note": "Connecting…",
   "game_over_title": "Game Over",
   "final_score": "🏆 Final score: {score}",
-  "all_time_leaderboard_heading": "All-time leaderboard",
+  "leaderboard_heading": "Leaderboard",
   "play_again_button": "Play Again",
   "home_button": "🏠 Home",
-  "all_time_score_summary": "best 🏆 {score} · {games} games"
+  "session_score_summary": "🏆 {score}"
 }
