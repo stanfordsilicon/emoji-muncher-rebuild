@@ -86,6 +86,19 @@ class InMemoryScoreRepository {
     const p = this._players.get(username);
     return p ? p.passwordHash : null;
   }
+
+  // Resets every player's LEADERBOARD STATS to zero without touching
+  // usernames or passwordHash -- accounts must survive a leaderboard wipe,
+  // or clearing the board would also silently free up every claimed
+  // username for anyone to re-register.
+  async clearLeaderboard() {
+    for (const p of this._players.values()) {
+      p.bestScore = 0;
+      p.totalScore = 0;
+      p.gamesPlayed = 0;
+      p.lastPlayedAt = null;
+    }
+  }
 }
 
 class MongoScoreRepository {
@@ -190,6 +203,20 @@ class MongoScoreRepository {
       console.error("[score] getPasswordHash failed:", err.message);
       return null;
     }
+  }
+
+  // Resets every player's LEADERBOARD STATS to zero without touching
+  // usernames or passwordHash -- accounts must survive a leaderboard wipe
+  // (a plain deleteMany({}) here would also free up every claimed username
+  // for anyone to re-register, since this collection doubles as the
+  // account store -- see stripPasswordHash's comment at the top of this
+  // file for why the two are combined).
+  async clearLeaderboard() {
+    const col = await this._col();
+    await col.updateMany(
+      {},
+      { $set: { bestScore: 0, totalScore: 0, gamesPlayed: 0, lastPlayedAt: null } }
+    );
   }
 }
 

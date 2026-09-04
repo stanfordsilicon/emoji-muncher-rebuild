@@ -19,6 +19,7 @@
 // can reuse the identical app.
 
 const path = require("path");
+const crypto = require("crypto");
 const express = require("express");
 const bcrypt = require("bcryptjs");
 
@@ -38,6 +39,26 @@ app.all("/arcade-api/v1/*", arcadeProxy); // local dev only — see arcade-proxy
 
 app.get("/api/leaderboard", async (req, res) => {
   res.json({ leaderboard: await scoreRepository.getLeaderboard(20) });
+});
+
+// Admin-only, server-to-server: qmoji-2's own /api/admin/clear-leaderboard
+// route is the only intended caller -- it authenticates the human admin
+// itself (a real qmoji-2 admin session token) and then relays here with
+// this shared secret, so the secret never reaches a browser. Resets stats
+// only (see ScoreRepository.clearLeaderboard) -- accounts/passwords are
+// untouched.
+app.post("/api/admin/clear-leaderboard", async (req, res) => {
+  const expected = process.env.QMOJI_ADMIN_SECRET;
+  const given = req.get("x-qmoji-admin-secret") || "";
+  if (!expected || !timingSafeStringEqual(given, expected)) {
+    return res.status(403).json({ ok: false, error: "Forbidden" });
+  }
+  try {
+    await scoreRepository.clearLeaderboard();
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
 });
 
 // Deliberately touches zero database code -- exists to isolate whether a
@@ -67,6 +88,21 @@ app.get("/api/warmup", async (req, res) => {
     res.status(500).json({ ok: false, error: err.message });
   }
 });
+
+// crypto.timingSafeEqual throws on length mismatch, so pad both sides to
+// the same length first -- a length-revealing early return would leak the
+// secret's length one comparison at a time, same reasoning as
+// authHandler.js's DUMMY_HASH trick in qmoji-2.
+function timingSafeStringEqual(a, b) {
+  const bufA = Buffer.from(String(a));
+  const bufB = Buffer.from(String(b));
+  const len = Math.max(bufA.length, bufB.length, 1);
+  const paddedA = Buffer.alloc(len);
+  const paddedB = Buffer.alloc(len);
+  bufA.copy(paddedA);
+  bufB.copy(paddedB);
+  return crypto.timingSafeEqual(paddedA, paddedB) && bufA.length === bufB.length;
+}
 
 function normId(value) {
   return String(value || "").trim();
